@@ -15,37 +15,10 @@ from matplotlib.backends.backend_qt4agg import (
 from matplotlib.figure import Figure
 
 from tifffile import imread, imsave
-from utils import Movie
-from threads import ColocWorker
+import utils
+from threads import SegmentationWorker, ColocWorker
 
 os.environ["QT_API"] = "pyqt4"
-
-
-class ColocView(QtGui.QWidget):
-    def __init__(self, parent):
-        super(ColocView, self).__init__(parent.ui.coloc_groupbox)
-        self.parent = parent
-        self.dpi = 100
-        self.fig = Figure((512 / self.dpi, 512 / self.dpi), dpi=self.dpi)
-        self.canvas = FigureCanvas(self.fig)
-        self.canvas.setParent(parent.ui.coloc_groupbox)
-        self.ax = self.fig.add_subplot(111)
-        self.mpl_toolbar = NavigationToolbar(
-            self.canvas, parent.ui.coloc_groupbox, coordinates=False)
-
-        vbox = QtGui.QVBoxLayout()
-        vbox.addWidget(self.canvas)
-        vbox.addWidget(self.mpl_toolbar)
-        parent.ui.coloc_groupbox.setLayout(vbox)
-
-    def draw_frame(self, data):
-        img = np.zeros((512, 512, 4), dtype=np.uint8)
-        img[:, :, 0] = data[0]
-        img[:, :, 1] = data[1]
-        img[:, :, 2] = 255
-        img[:, :, 3] = 255
-        self.ax.imshow(img, interpolation='nearest')
-        self.canvas.draw()
 
 
 class MovieView(QtGui.QGraphicsView):
@@ -53,8 +26,8 @@ class MovieView(QtGui.QGraphicsView):
     # key_press = QtCore.pyqtSignal(object)
     mouse_press = QtCore.Signal(float, float, name='mouse_press')
 
-    def __init__(self, parent):
-        super(MovieView, self).__init__(parent.ui.movie_groupbox)
+    def __init__(self, parent, container):
+        super(MovieView, self).__init__(container)
         self.parent = parent
         self.statusbar = parent.ui.statusbar
         # Class variables.
@@ -89,60 +62,66 @@ class MovieView(QtGui.QGraphicsView):
         self.setRenderHint(QtGui.QPainter.Antialiasing)
         self.scale(1.0, 1.0)
 
-    def show_new_frame(self, frame, fmin, fmax, threshold=0.0):
+    def show_movie_frame(self, frame, fmin, fmax, threshold=0.0):
         self.scene.clear()
         # process image
         # save image
         self.data = frame.copy()
+        # scale image.
+        frame = 255.0 * ((frame - fmin) / (fmax - fmin))
+        frame[(frame > 255.0)] = 255.0
+        frame[(frame < 0.0)] = 0.0
 
-        if frame.ndim == 2 and threshold == 0.0:
-            # scale image.
-            frame = 255.0 * ((frame - fmin) / (fmax - fmin))
-            frame[(frame > 255.0)] = 255.0
-            frame[(frame < 0.0)] = 0.0
+        # and set type to uint8
+        frame = frame.astype(np.uint8)
+        # convert to RGB
+        h, w = frame.shape
+        frame_RGB = np.zeros((
+            frame.shape[0], frame.shape[1], 4), dtype=np.uint8)
 
-            # convert to QImage.
-            frame = frame.astype(np.uint8)
-            h, w = frame.shape
-            frame_RGB = np.zeros((
-                frame.shape[0], frame.shape[1], 4), dtype=np.uint8)
-            frame_RGB[:, :, 0] = frame
-            frame_RGB[:, :, 1] = frame
-            frame_RGB[:, :, 2] = frame
-            frame_RGB[:, :, 3] = 255
-        elif frame.ndim == 2 and threshold > 0.0:
+        if threshold == 0.0:
+            r = frame
+            g = frame
+            b = frame
 
-            idx = np.where(frame > threshold)
+        elif threshold > 0.0:
 
-            # scale image.
-            frame = 255.0 * ((frame - fmin) / (fmax - fmin))
-            frame[(frame > 255.0)] = 255.0
-            frame[(frame < 0.0)] = 0.0
+            idx = np.where(self.data > threshold)
 
             r = frame
             r[idx] = 255
             g = frame
             b = frame
-            # convert to QImage.
-            frame = frame.astype(np.uint8)
-            h, w = frame.shape
-            frame_RGB = np.zeros((
-                frame.shape[0], frame.shape[1], 4), dtype=np.uint8)
-            frame_RGB[:, :, 0] = r
-            frame_RGB[:, :, 1] = g
-            frame_RGB[:, :, 2] = b
-            frame_RGB[:, :, 3] = 255
-        elif frame.ndim == 3:
-            # convert to QImage.
-            red = frame[0, :, :].astype(np.uint8)
-            green = frame[1, :, :].astype(np.uint8)
-            h, w = red.shape
-            frame_RGB = np.zeros((
-                red.shape[0], red.shape[1], 4), dtype=np.uint8)
-            frame_RGB[:, :, 0] = 0
-            frame_RGB[:, :, 1] = green
-            frame_RGB[:, :, 2] = red
-            frame_RGB[:, :, 3] = 255
+
+        frame_RGB[:, :, 0] = r
+        frame_RGB[:, :, 1] = g
+        frame_RGB[:, :, 2] = b
+        frame_RGB[:, :, 3] = 255
+
+        # convert to QImage
+        self.image = QtGui.QImage(
+            frame_RGB.data, w, h, QtGui.QImage.Format_RGB32)
+        self.image.ndarray1 = frame
+        self.image.ndarray2 = frame_RGB
+
+        # add to scene
+        self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
+
+    def show_segmentation_frame(self, frame):
+        self.scene.clear()
+        # process image
+        # save image
+        self.data = frame.copy()
+
+        red = frame[0, :, :].astype(np.uint8)
+        green = frame[1, :, :].astype(np.uint8)
+        h, w = red.shape
+        frame_RGB = np.zeros((
+            red.shape[0], red.shape[1], 4), dtype=np.uint8)
+        frame_RGB[:, :, 0] = 0
+        frame_RGB[:, :, 1] = green
+        frame_RGB[:, :, 2] = red
+        frame_RGB[:, :, 3] = 255
 
         self.image = QtGui.QImage(
             frame_RGB.data, w, h, QtGui.QImage.Format_RGB32)
@@ -165,14 +144,20 @@ class MovieView(QtGui.QGraphicsView):
         self.scale(self.zoom_out, self.zoom_out)
 
 
+class ColocView(MovieView):
+    def __init__(self, parent, container):
+        super(ColocView, self).__init__(parent, container)
+        self.parent = parent
+
+
 class MainGUIWindow(QtGui.QMainWindow):
     def __init__(self, parent=None):
         QtGui.QMainWindow.__init__(self, parent)
 
         self.ui = obcol_gui.Ui_MainWindow()
         self.ui.setupUi(self)
-        self.movie_view = MovieView(self)
-        self.coloc_view = ColocView(self)
+        self.movie_view = MovieView(self, self.ui.movie_groupbox)
+        self.coloc_view = ColocView(self, self.ui.coloc_groupbox)
 
         # parameters
         self.directory = ""
@@ -180,7 +165,8 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.old_f = 1
         self.curr_channel = 0
         self.is_movie = False
-        self.is_result = False
+        self.is_segmentation = False
+        self.is_colocalisation = False
         self.thresholds = None
 
         # ui conditions
@@ -192,6 +178,8 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.open_button.clicked.connect(self.load_movie)
         self.ui.quit_button.clicked.connect(self.quit)
         self.ui.frame_slider.valueChanged.connect(self.handle_frame_slider)
+        self.ui.coloc_frame_slider.valueChanged.connect(
+            self.handle_frame_slider)
         self.ui.channel_spinbox.valueChanged.connect(
             self.handle_channel_spinbox)
         self.ui.fmin_slider.valueChanged.connect(self.handle_fmin_slider)
@@ -200,26 +188,29 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.fmax_slider.sliderReleased.connect(self.update_display)
         self.ui.fmin_spinbox.valueChanged.connect(self.handle_fmin_spinbox)
         self.ui.fmax_spinbox.valueChanged.connect(self.handle_fmax_spinbox)
-        self.ui.threshold_slider.sliderReleased.connect(self.handle_threshold_slider_released)
+        self.ui.threshold_slider.sliderReleased.connect(
+            self.handle_threshold_slider_released)
         self.ui.threshold_slider.valueChanged.connect(
             self.handle_threshold_slider)
         self.ui.threshold_spinbox.valueChanged.connect(
             self.handle_threshold_spinbox)
-        self.ui.run_button.clicked.connect(self.run_colocalisation)
+        self.ui.run_button.clicked.connect(self.start_segmentation_thread)
         self.ui.movie_radio.toggled.connect(self.handle_radio_state)
         self.ui.result_radio.toggled.connect(self.handle_radio_state)
-
-        # threads
-        self.coloc_worker = ColocWorker(self)
-        self.coloc_worker.processing_frame.connect(self.update_progress)
-#        self.coloc_worker.colocalisation_signal.connect(self.colocalisation_analyser)
-        self.coloc_worker.label_signal.connect(self.colocalisation_plotter)
+        self.ui.update_button.clicked.connect(
+            self.start_colocalisation_thread)
+        self.ui.reset_button.clicked.connect(self.handle_colocalisation_reset)
 
         self.ui.radio_groupbox.hide()
 
     # slots
     def handle_frame_slider(self, value):
-        if self.is_movie or self.is_result:
+        if self.is_movie or self.is_segmentation:
+            slider = self.sender()
+            if str(slider.objectName()) == "frame_slider":
+                self.ui.coloc_frame_slider.setValue(value)
+            elif str(slider.objectName()) == "coloc_frame_slider":
+                self.ui.frame_slider.setValue(value)
             curr_f = value
             if curr_f > self.old_f:
                 self.get_frame(1)
@@ -229,10 +220,11 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
+        frame = utils.load_frame(self.movie, self.curr_frame)
         self.fmin = float(
-            np.min(self.movie[self.curr_frame].img[self.curr_channel, :, :]))
+            np.min(frame[self.curr_channel, :, :]))
         self.fmax = float(
-            np.max(self.movie[self.curr_frame].img[self.curr_channel, :, :]))
+            np.max(frame[self.curr_channel, :, :]))
         self.ui.fmax_slider.setValue(self.fmax)
         self.ui.threshold_spinbox.setValue(self.thresholds[self.curr_channel])
         self.ui.threshold_slider.setValue(self.thresholds[self.curr_channel])
@@ -295,23 +287,25 @@ class MainGUIWindow(QtGui.QMainWindow):
                 "Load Movie", self.directory, "*.tif")))
         if self.movie_path:
             self.directory = os.path.dirname(self.movie_path)
-            self.movie = Movie(self.movie_path)
-            if self.movie.ndim == 4:
+            movie_array = imread(self.movie_path)
+            self.movie = utils.generate_frames(movie_array)
+            if movie_array.ndim == 4:
                 self.is_movie = True
-                self.num_frames = self.movie.num_frames
-                self.num_channels = self.movie.num_channels
-                self.height = self.movie.height
-                self.width = self.movie.width
+                self.num_frames = movie_array.shape[0]
+                self.num_channels = movie_array.shape[1]
+                self.height = movie_array.shape[2]
+                self.width = movie_array.shape[3]
 
                 self.thresholds = [0.0 for c in range(self.num_channels)]
                 self.ui.frame_slider.setMaximum(self.num_frames)
                 self.ui.channel_spinbox.setMaximum(self.num_channels - 1)
+                first = movie_array[0, :, :, :]
                 self.fmin = float(
-                    np.min(self.movie[0].img[self.curr_channel, :, :]))
+                    np.min(first[self.curr_channel, :, :]))
                 self.fmax = float(
-                    np.max(self.movie[0].img[self.curr_channel, :, :]))
+                    np.max(first[self.curr_channel, :, :]))
 
-                self.movie_dtype = self.movie.dtype
+                self.movie_dtype = movie_array.dtype
                 if self.movie_dtype == np.uint16:
                     bit_depth = 2**16
                 elif self.movie_dtype == np.uint8:
@@ -334,28 +328,66 @@ class MainGUIWindow(QtGui.QMainWindow):
                 QtGui.QMessageBox.information(self, "Error",
                                               "Timelapse data only please")
 
-    def run_colocalisation(self):
+    def prepare_parameters(self):
         red_chan = int(self.ui.red_channel_spinbox.value())
         green_chan = int(self.ui.green_channel_spinbox.value())
         channels = [red_chan, green_chan]
         thresholds = [
             self.thresholds[red_chan], self.thresholds[green_chan]]
-        overlap = float(self.ui.overlap_spinbox.value()) / 100.0
+        overlap = float(self.ui.overlap_spinbox.value())
+        if overlap > 0.0:
+            overlap = overlap / 100.0
         params = {}
         params['thresholds'] = thresholds
         params['channels'] = channels
         params['overlap'] = overlap
-        self.coloc_worker.start_thread(self.movie, params)
+        return params
 
-    def colocalisation_plotter(self, result):
-        self.result = result
-        self.is_result = True
+    def start_segmentation_thread(self):
+        self.is_filtered = False
+        self.is_result = False
+        self.is_movie = True
+        self.segmentation_result = []
+        self.colocalisation_result = []
+        params = self.prepare_parameters()
+        self.segmentation_worker = SegmentationWorker(self)
+        self.segmentation_worker.progress_signal.connect(self.update_progress)
+        self.segmentation_worker.results_signal.connect(
+            self.segmentation_plotter)
+        self.segmentation_worker.start_thread(self.movie, params)
+
+    def segmentation_plotter(self, result):
+        self.segmentation_result = result
+        self.is_segmentation = True
         self.is_movie = False
         self.ui.radio_groupbox.show()
         self.ui.result_radio.setChecked(True)
         self.ui.movie_radio.setChecked(False)
-        self.get_frame(0)
         self.ui.progress_bar.setValue(0)
+        self.get_frame(0)
+
+    def start_colocalisation_thread(self):
+        params = self.prepare_parameters()
+        if params['overlap'] == 0.0:
+            self.handle_colocalisation_reset()
+        else:
+            self.coloc_worker = ColocWorker(self)
+            self.coloc_worker.progress_signal.connect(self.update_progress)
+            self.coloc_worker.results_signal.connect(
+                self.colocalisation_plotter)
+            self.coloc_worker.start_thread(self.segmentation_result, params)
+
+    def colocalisation_plotter(self, result):
+        self.is_colocalisation = True
+        self.colocalisation_result = result
+        self.ui.progress_bar.setValue(0)
+        self.get_frame(0)
+
+    def handle_colocalisation_reset(self):
+        self.is_colocalisation = False
+        self.is_segmentation = True
+        self.ui.overlap_spinbox.setValue(0)
+        self.get_frame(0)
 
     def update_progress(self, frame_num):
         self.ui.progress_bar.setValue(frame_num)
@@ -363,18 +395,28 @@ class MainGUIWindow(QtGui.QMainWindow):
     # controllers
     def display_frame(self):
         if self.is_movie:
+            current_frame = utils.load_frame(self.movie, self.curr_frame)
             frame = (
                 np.ascontiguousarray(
-                    self.movie[self.curr_frame].img[self.curr_channel, :, :]))
-            self.movie_view.show_new_frame(
+                    current_frame[self.curr_channel, :, :]))
+            self.movie_view.show_movie_frame(
                 frame,
                 self.fmin,
                 self.fmax,
                 self.thresholds[self.curr_channel])
-        if self.is_result:
+        if self.is_segmentation:
+            current_labels = utils.load_frame_labels(
+                self.segmentation_result, self.curr_frame)
             frame = (
-                np.ascontiguousarray(self.result[self.curr_frame, :, :, :]))
-            self.movie_view.show_new_frame(frame, 0, 255)
+                np.ascontiguousarray(current_labels))
+            self.movie_view.show_segmentation_frame(frame)
+            self.coloc_view.show_segmentation_frame(frame)
+        if self.is_colocalisation:
+            current_labels = utils.load_frame_labels(
+                self.colocalisation_result, self.curr_frame, filtered=True)
+            filtered = (
+                np.ascontiguousarray(current_labels))
+            self.coloc_view.show_segmentation_frame(filtered)
 
     def get_frame(self, step):
         self.curr_frame += step
