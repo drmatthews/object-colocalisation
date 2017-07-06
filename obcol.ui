@@ -307,7 +307,7 @@
         <height>501</height>
        </rect>
       </property>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <layout class="QVBoxLayout" name="results_groupbox">
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_7">
          <item>
@@ -374,7 +374,18 @@
         </layout>
        </item>
        <item>
-        <widget class="QTableView" name="results_table"/>
+        <widget class="QTableWidget" name="results_table">
+         <property name="rowCount">
+          <number>1</number>
+         </property>
+         <property name="columnCount">
+          <number>3</number>
+         </property>
+         <row/>
+         <column/>
+         <column/>
+         <column/>
+        </widget>
        </item>
       </layout>
      </widget>

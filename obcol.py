@@ -21,6 +21,34 @@ from threads import SegmentationWorker, ColocWorker
 os.environ["QT_API"] = "pyqt4"
 
 
+class ResultsTable(QtGui.QWidget):
+    def __init__(self, parent, table):
+        super(ResultsTable, self).__init__(parent)
+        self.parent = parent
+        self.table = table
+        self.header = ["frame id",
+                       "red_coloc_fraction",
+                       "green_coloc_fraction"]
+
+    def set_data(self, data, channels):
+        for i, row in enumerate(data):
+            frame_item = QtGui.QTableWidgetItem(str(i))
+            red_item = QtGui.QTableWidgetItem(
+                str(row.patches[channels[0]].fraction_with_overlap))
+            print(str(row.patches[channels[0]].fraction_with_overlap))
+            green_item = QtGui.QTableWidgetItem(
+                str(row.patches[channels[1]].fraction_with_overlap))
+            self.table.insertRow(i + 1)
+            self.table.setItem(i, 0, frame_item)
+            self.table.setItem(i, 1, red_item)
+            self.table.setItem(i, 2, green_item)
+
+        self.table.resizeColumnsToContents()
+        self.table.resizeRowsToContents()
+        self.table.setHorizontalHeaderLabels(self.header)
+        self.table.show()
+
+
 class MovieView(QtGui.QGraphicsView):
 
     # key_press = QtCore.pyqtSignal(object)
@@ -158,6 +186,8 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.setupUi(self)
         self.movie_view = MovieView(self, self.ui.movie_groupbox)
         self.coloc_view = ColocView(self, self.ui.coloc_groupbox)
+        self.table_widget = ResultsTable(self, self.ui.results_table)
+        self.table_widget.hide()
 
         # parameters
         self.directory = ""
@@ -357,6 +387,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.segmentation_worker.start_thread(self.movie, params)
 
     def segmentation_plotter(self, result):
+        params = self.prepare_parameters()
         self.segmentation_result = result
         self.is_segmentation = True
         self.is_movie = False
@@ -364,6 +395,8 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.result_radio.setChecked(True)
         self.ui.movie_radio.setChecked(False)
         self.ui.progress_bar.setValue(0)
+        self.table_widget.set_data(result, params['channels'])
+        self.table_widget.show()
         self.get_frame(0)
 
     def start_colocalisation_thread(self):

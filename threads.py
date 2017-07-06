@@ -63,7 +63,7 @@ class SegmentationWorker(QThread):
             for frame in self.movie]
         results = []
         rs = self.pool.map_async(
-            utils.parallel_segment, parameter_list, callback=results.append)
+            utils.parallel_obcol, parameter_list, callback=results.append)
         while (True):
             if (rs.ready()):
                 break
