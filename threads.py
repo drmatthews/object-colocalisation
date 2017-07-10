@@ -1,8 +1,9 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
+import os
 from PyQt4.QtCore import QThread
 from PyQt4.QtCore import Signal
-import numpy as np
+import pandas as pd
 from multiprocessing import Pool, Manager, cpu_count
 
 import utils
@@ -11,12 +12,12 @@ import utils
 # note that you should also look at deploying this thread across multiple cores
 
 
-class SegmentationWorker(QThread):
+class ObcolWorker(QThread):
     progress_signal = Signal(int)
     results_signal = Signal(list)
 
     def __init__(self, parent=None):
-        super(SegmentationWorker, self).__init__(parent)
+        super(ObcolWorker, self).__init__(parent)
         self.stopped = False
         num_cpus = cpu_count() - 1  # don't kill the computer
         self.pool = Pool(num_cpus)
@@ -44,26 +45,39 @@ class SegmentationWorker(QThread):
         """
         if self.is_stopped():
             return
-        results = self.segment_movie()
+        results = self.object_colocalisation()
         self.results_signal.emit(results)
+        self.clear_queue()
+        # self.save(results)
         # results = self.colocalise_movie_sequential()
         # self.post_process(results)
 
-    def segment_movie(self):
+    def object_colocalisation(self):
         """
         Distribute the work of colocalisation across multiple CPUs.
         Note this uses the utils.parallel_obcol helper function
         """
         self.channels = self.parameters['channels']
         self.thresholds = self.parameters['thresholds']
-        self.overlap = 0.0
+        self.overlap = self.parameters['overlap']
+        print("overlap", self.overlap)
+        self.size_range = self.parameters['size_range']
+        self.segment = self.parameters['segment']
+        print("segment", self.segment)
         q = self.queue
         parameter_list = [(q, utils.Parameters(
-            frame, self.channels, self.thresholds, self.overlap))
+            frame,
+            self.channels,
+            self.thresholds,
+            self.overlap,
+            self.size_range,
+            self.segment))
             for frame in self.movie]
         results = []
         rs = self.pool.map_async(
-            utils.parallel_obcol, parameter_list, callback=results.append)
+            utils.parallel_process,
+            parameter_list,
+            callback=results.append)
         while (True):
             if (rs.ready()):
                 break
@@ -71,7 +85,7 @@ class SegmentationWorker(QThread):
         rs.wait()
         return results[0]
 
-    def segment_movie_sequential(self):
+    def object_colocalisation_sequential(self):
         """
         Colocalise frames in a movie instance using parameters
         defined in the parameter list - run on a single CPU
@@ -80,39 +94,33 @@ class SegmentationWorker(QThread):
         self.channels = self.parameters['channels']
         self.thresholds = self.parameters['thresholds']
         self.overlap = self.parameters['overlap']
+        self.size_range = self.parameters['size_range']
         results = []
         for i, frame in enumerate(self.movie):
             self.processing_frame.emit(i)
-            frame.segment(self.channels, self.thresholds, self.overlap)
+            frame.segment(
+                self.channels, self.thresholds, self.overlap, self.size_range)
             results.append(frame)
 
         return results
 
-    # def post_process(self, results):
-    #     """
-    #     Prepare the result of coloclisation for display in the GUI
-    #     """
-    #     num_frames = self.movie.num_frames
-    #     all_labels = np.zeros((
-    #         num_frames, 2, self.movie.height, self.movie.width))
-    #     colocalised = []
-    #     print(len(results))
-    #     for i, frame in enumerate(results):
-    #         for channel in range(2):
-    #             all_labels[i, channel, :, :] = (
-    #                 frame.mono_labels(self.channels[channel]))
-    #         c = (frame.red_overlaps, frame.green_overlaps)
-    #         colocalised.append(c)
-    #     self.label_signal.emit(all_labels)
-    #     self.colocalisation_signal.emit(colocalised)
+    def save(self, results):
+        movie_path = self.parameters['movie_path']
+        channels = self.channels
+        utils.save_patches(
+            os.path.basename(movie_path), results, channels)
+
+    def clear_queue(self):
+        while not self.queue.empty():
+            self.queue.get_nowait()
 
 
-class ColocWorker(QThread):
+class SaveWorker(QThread):
     progress_signal = Signal(int)
-    results_signal = Signal(list)
+    finished_signal = Signal(int)
 
     def __init__(self, parent=None):
-        super(ColocWorker, self).__init__(parent)
+        super(SaveWorker, self).__init__(parent)
         self.stopped = False
 
     def stop(self):
@@ -121,29 +129,58 @@ class ColocWorker(QThread):
     def isStopped(self):
         return self.stopped
 
-    def start_thread(self, movie, parameters):
+    def start_thread(self, data, channels, path):
         """
         Method called from the GUI
         """
-        self.movie = movie
-        self.parameters = parameters
+        self.data = data
+        self.channels = channels
+        self.path = path
         self.start()
 
     def run(self):
         """
         This gets called when self.start() is called
         """
-        results = self.coloclisation()
-        self.results_signal.emit(results)
+        self.save()
+        self.finished_signal.emit(0)
 
-    def coloclisation(self):
-        results = []
-        channels = self.parameters['channels']
-        overlap = self.parameters['overlap']
+    def save(self):
+        frames = self.data
+        movie_path = self.path
+        channels = self.channels
+        basepath = os.path.dirname(movie_path)
+        basename = os.path.splitext(movie_path)[0]
+        path = os.path.join(basepath, basename + '_obcol.xlsx')
+        writer = pd.ExcelWriter(path)
+        channel_names = ["red", "green"]
+        counter = 0
+        for c, channel in enumerate(channels):
+            output = []
+            for frame_id, frame in enumerate(frames):
+                self.progress_signal.emit(counter)
+                for patch in frame.patches[channel]:
+                    output.append(
+                        [frame_id,
+                         patch.id,
+                         patch.centroid[0],
+                         patch.centroid[1],
+                         patch.intensity,
+                         patch.channel,
+                         patch.size,
+                         patch.size_overlapped])
 
-        for i, frame in enumerate(self.movie):
-            self.progress_signal.emit(i)
-            frame.object_colocalisation(channels, overlap)
-            results.append(frame)
-
-        return results
+                df = pd.DataFrame(output)
+                df.columns = [
+                    "frame id",
+                    "patch id",
+                    "centroid x",
+                    "centroid y",
+                    "intensity",
+                    "channel",
+                    "size",
+                    "size overlapped"]
+                df.to_excel(
+                    writer, sheet_name=channel_names[c], index=False)
+                counter += 1
+        writer.save()

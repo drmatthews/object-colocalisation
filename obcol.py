@@ -7,7 +7,7 @@ import sys
 import os
 import numpy as np
 
-# import matplotlib
+from matplotlib import pyplot as plt
 # matplotlib.use("Qt4Agg") # must be called before .backends or .pylab
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg as FigureCanvas,
@@ -16,37 +16,79 @@ from matplotlib.figure import Figure
 
 from tifffile import imread, imsave
 import utils
-from threads import SegmentationWorker, ColocWorker
+from threads import ObcolWorker, FilterWorker, SaveWorker
 
 os.environ["QT_API"] = "pyqt4"
 
 
-class ResultsTable(QtGui.QWidget):
-    def __init__(self, parent, table):
-        super(ResultsTable, self).__init__(parent)
+class HistogramView(QtGui.QWidget):
+    def __init__(self, parent):
+        super(HistogramView, self).__init__(parent.ui.histogram_groupbox)
         self.parent = parent
-        self.table = table
-        self.header = ["frame id",
-                       "red_coloc_fraction",
-                       "green_coloc_fraction"]
+        dpi = 100.0
+        self.fig = Figure((512.0 / dpi, 512.0 / dpi), dpi=dpi)
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setParent(parent.ui.histogram_groupbox)
 
-    def set_data(self, data, channels):
-        for i, row in enumerate(data):
-            frame_item = QtGui.QTableWidgetItem(str(i))
-            red_item = QtGui.QTableWidgetItem(
-                str(row.patches[channels[0]].fraction_with_overlap))
-            print(str(row.patches[channels[0]].fraction_with_overlap))
-            green_item = QtGui.QTableWidgetItem(
-                str(row.patches[channels[1]].fraction_with_overlap))
-            self.table.insertRow(i + 1)
-            self.table.setItem(i, 0, frame_item)
-            self.table.setItem(i, 1, red_item)
-            self.table.setItem(i, 2, green_item)
+        self.ax = self.fig.add_subplot(111)
+        self.mpl_toolbar = NavigationToolbar(
+            self.canvas, parent.ui.histogram_groupbox, coordinates=False)
 
-        self.table.resizeColumnsToContents()
-        self.table.resizeRowsToContents()
-        self.table.setHorizontalHeaderLabels(self.header)
-        self.table.show()
+        vbox = QtGui.QVBoxLayout()
+        vbox.addWidget(self.canvas)
+        vbox.addWidget(self.mpl_toolbar)
+
+        parent.ui.histogram_groupbox.setLayout(vbox)
+        self.mpl_toolbar.hide()
+        self.canvas.hide()
+
+    def draw(self, data, data_type, channel):
+        """ Draws the figure
+        """
+        self.canvas.show()
+        self.mpl_toolbar.show()
+        self.ax.clear()
+        self.ax.grid(True)
+        self.ax.set_ylabel('Count')
+        if data_type == 0:  # sizes
+            plot_data = data.sizes_of_patches(channel)
+            self.ax.set_xlabel('Size of overlap [pixels]')
+        if data_type == 1:  # fraction
+            plot_data = data.fraction_of_patch_overlapped(channel)
+            self.ax.set_xlabel('Size of overlap [%]')
+        elif data_type == 2:  # signals
+            plot_data = data.signals_of_patches(channel)
+            self.ax.set_xlabel('Total grey levels in overlap region')
+        self.ax.hist(plot_data, range=(1, max(plot_data)))
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+# class ResultsTable(QtGui.QWidget):
+#     def __init__(self, parent, table):
+#         super(ResultsTable, self).__init__(parent)
+#         self.parent = parent
+#         self.table = table
+#         self.header = ["frame id",
+#                        "red_coloc_fraction",
+#                        "green_coloc_fraction"]
+
+#     def set_data(self, data, channels):
+#         for i, row in enumerate(data):
+#             frame_item = QtGui.QTableWidgetItem(str(i))
+#             red_item = QtGui.QTableWidgetItem(
+#                 str(row.patches[channels[0]].fraction_with_overlap))
+#             print(str(row.patches[channels[0]].fraction_with_overlap))
+#             green_item = QtGui.QTableWidgetItem(
+#                 str(row.patches[channels[1]].fraction_with_overlap))
+#             self.table.insertRow(i + 1)
+#             self.table.setItem(i, 0, frame_item)
+#             self.table.setItem(i, 1, red_item)
+#             self.table.setItem(i, 2, green_item)
+
+#         self.table.resizeColumnsToContents()
+#         self.table.resizeRowsToContents()
+#         self.table.setHorizontalHeaderLabels(self.header)
+#         self.table.show()
 
 
 class MovieView(QtGui.QGraphicsView):
@@ -186,13 +228,15 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.setupUi(self)
         self.movie_view = MovieView(self, self.ui.movie_groupbox)
         self.coloc_view = ColocView(self, self.ui.coloc_groupbox)
-        self.table_widget = ResultsTable(self, self.ui.results_table)
-        self.table_widget.hide()
+        # self.table_widget = ResultsTable(self, self.ui.results_table)
+        self.histogram_view = HistogramView(self)
+        # self.table_widget.hide()
 
         # parameters
         self.directory = ""
         self.curr_frame = 0
         self.old_f = 1
+        self.old_coloc_f = 1
         self.curr_channel = 0
         self.is_movie = False
         self.is_segmentation = False
@@ -205,11 +249,14 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.fmax_spinbox.setKeyboardTracking(False)
 
         # signals
+        self.ui.tabWidget.currentChanged.connect(self.handle_tab_change)
         self.ui.open_button.clicked.connect(self.load_movie)
+        self.ui.save_button.clicked.connect(self.save)
         self.ui.quit_button.clicked.connect(self.quit)
-        self.ui.frame_slider.valueChanged.connect(self.handle_frame_slider)
-        self.ui.coloc_frame_slider.valueChanged.connect(
+        self.ui.frame_slider.valueChanged.connect(
             self.handle_frame_slider)
+        self.ui.coloc_frame_slider.valueChanged.connect(
+            self.handle_coloc_frame_slider)
         self.ui.channel_spinbox.valueChanged.connect(
             self.handle_channel_spinbox)
         self.ui.fmin_slider.valueChanged.connect(self.handle_fmin_slider)
@@ -224,29 +271,56 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.handle_threshold_slider)
         self.ui.threshold_spinbox.valueChanged.connect(
             self.handle_threshold_spinbox)
-        self.ui.run_button.clicked.connect(self.start_segmentation_thread)
+        self.ui.run_button.clicked.connect(self.start_obcol_thread)
         self.ui.movie_radio.toggled.connect(self.handle_radio_state)
         self.ui.result_radio.toggled.connect(self.handle_radio_state)
+        self.ui.min_size_spinbox.valueChanged.connect(
+            self.handle_min_size_spinbox)
+        self.ui.max_size_spinbox.valueChanged.connect(
+            self.handle_max_size_spinbox)
+        self.ui.min_size_spinbox_2.valueChanged.connect(
+            self.handle_min_size_spinbox)
+        self.ui.max_size_spinbox_2.valueChanged.connect(
+            self.handle_max_size_spinbox)
         self.ui.update_button.clicked.connect(
-            self.start_colocalisation_thread)
+            self.start_filter_thread)
         self.ui.reset_button.clicked.connect(self.handle_colocalisation_reset)
-
+        self.ui.channel_combobox.currentIndexChanged.connect(
+            self.handle_channel_combo)
+        self.ui.data_combobox.currentIndexChanged.connect(
+            self.handle_data_combo)
         self.ui.radio_groupbox.hide()
 
+        # threads
+        self.obcol_worker = ObcolWorker(self)
+        self.obcol_worker.progress_signal.connect(self.update_progress)
+        self.save_worker = SaveWorker(self)
+
     # slots
+    def handle_tab_change(self):
+        self.curr_frame = 0
+        self.ui.frame_slider.setValue(0)
+        self.ui.coloc_frame_slider.setValue(0)
+
     def handle_frame_slider(self, value):
+        # print("is_movie", self.is_movie)
+        # print("is_segmentation", self.is_segmentation)
         if self.is_movie or self.is_segmentation:
-            slider = self.sender()
-            if str(slider.objectName()) == "frame_slider":
-                self.ui.coloc_frame_slider.setValue(value)
-            elif str(slider.objectName()) == "coloc_frame_slider":
-                self.ui.frame_slider.setValue(value)
             curr_f = value
             if curr_f > self.old_f:
                 self.get_frame(1)
             else:
                 self.get_frame(-1)
             self.old_f = curr_f
+
+    def handle_coloc_frame_slider(self, value):
+        if self.is_segmentation:
+            curr_f = value
+            if curr_f > self.old_coloc_f:
+                self.get_frame(1)
+            else:
+                self.get_frame(-1)
+            self.old_coloc_f = curr_f
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
@@ -291,11 +365,11 @@ class MainGUIWindow(QtGui.QMainWindow):
         if radio.text() == "Movie":
             if radio.isChecked():
                 self.is_movie = True
-                self.is_result = False
+                self.is_segmentation = False
         elif radio.text() == "Result":
             if radio.isChecked():
                 self.is_movie = False
-                self.is_result = True
+                self.is_segmentation = True
 
         self.display_frame()
 
@@ -303,8 +377,34 @@ class MainGUIWindow(QtGui.QMainWindow):
         if value:
             self.ui.movie_radio.setValue(False)
             self.is_movie = False
-            self.is_result = True
+            self.is_segmentation = True
             self.display_frame()
+
+    def handle_channel_combo(self, value):
+        channel = self.params['channels'][value]
+        data_type = self.ui.data_combobox.currentIndex()
+        data = self.segmentation_result[self.curr_frame]
+        self.histogram_view.draw(data, data_type, channel)
+
+    def handle_min_size_spinbox(self, value):
+        sender = self.sender().objectName()
+        if "2" in sender:
+            self.ui.min_size_spinbox.setValue(value)
+        else:
+            self.ui.min_size_spinbox_2.setValue(value)
+
+    def handle_max_size_spinbox(self, value):
+        sender = self.sender().objectName()
+        if "2" in sender:
+            self.ui.max_size_spinbox.setValue(value)
+        else:
+            self.ui.max_size_spinbox_2.setValue(value)
+
+    def handle_data_combo(self, value):
+        coloc_channel = self.ui.channel_combobox.currentIndex()
+        channel = self.params['channels'][coloc_channel]
+        data = self.segmentation_result[self.curr_frame]
+        self.histogram_view.draw(data, value, channel)
 
     def update_display(self):
         self.fmin = float(self.ui.fmin_slider.value())
@@ -328,6 +428,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
                 self.thresholds = [0.0 for c in range(self.num_channels)]
                 self.ui.frame_slider.setMaximum(self.num_frames)
+                self.ui.coloc_frame_slider.setMaximum(self.num_frames)
                 self.ui.channel_spinbox.setMaximum(self.num_channels - 1)
                 first = movie_array[0, :, :, :]
                 self.fmin = float(
@@ -352,13 +453,24 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.ui.threshold_spinbox.setMaximum(bit_depth)
                 self.ui.red_channel_spinbox.setMaximum(self.num_channels - 1)
                 self.ui.green_channel_spinbox.setMaximum(self.num_channels - 1)
+                self.ui.movie_radio.setChecked(True)
+                self.ui.result_radio.setChecked(False)
                 self.get_frame(0)
                 self.ui.progress_bar.setMaximum(self.num_frames)
             else:
                 QtGui.QMessageBox.information(self, "Error",
                                               "Timelapse data only please")
 
-    def prepare_parameters(self):
+    def save(self):
+        if self.is_segmentation:
+            self.save_worker.progress_signal.connect(self.update_progress)
+            self.save_worker.finished_signal.connect(self.update_progress)
+            self.save_worker.start_thread(
+                self.segmentation_result,
+                self.params['channels'],
+                self.movie_path)
+
+    def prepare_parameters(self, segment=True):
         red_chan = int(self.ui.red_channel_spinbox.value())
         green_chan = int(self.ui.green_channel_spinbox.value())
         channels = [red_chan, green_chan]
@@ -367,27 +479,30 @@ class MainGUIWindow(QtGui.QMainWindow):
         overlap = float(self.ui.overlap_spinbox.value())
         if overlap > 0.0:
             overlap = overlap / 100.0
+        min_size = self.ui.min_size_spinbox.value()
+        max_size = self.ui.max_size_spinbox.value()
         params = {}
+        params['movie_path'] = self.movie_path
         params['thresholds'] = thresholds
         params['channels'] = channels
         params['overlap'] = overlap
+        params['size_range'] = (min_size, max_size)
+        params['segment'] = segment
+        self.params = params
         return params
 
-    def start_segmentation_thread(self):
+    def start_obcol_thread(self):
         self.is_filtered = False
         self.is_result = False
         self.is_movie = True
         self.segmentation_result = []
         self.colocalisation_result = []
         params = self.prepare_parameters()
-        self.segmentation_worker = SegmentationWorker(self)
-        self.segmentation_worker.progress_signal.connect(self.update_progress)
-        self.segmentation_worker.results_signal.connect(
-            self.segmentation_plotter)
-        self.segmentation_worker.start_thread(self.movie, params)
+        self.obcol_worker.results_signal.connect(
+            self.obcol_plotter)
+        self.obcol_worker.start_thread(self.movie, params)
 
-    def segmentation_plotter(self, result):
-        params = self.prepare_parameters()
+    def obcol_plotter(self, result):
         self.segmentation_result = result
         self.is_segmentation = True
         self.is_movie = False
@@ -395,22 +510,24 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.result_radio.setChecked(True)
         self.ui.movie_radio.setChecked(False)
         self.ui.progress_bar.setValue(0)
-        self.table_widget.set_data(result, params['channels'])
-        self.table_widget.show()
+        channel = self.params['channels'][0]
+        self.histogram_view.draw(result[0], 0, channel)
+        # self.table_widget.set_data(result, params['channels'])
+        # self.table_widget.show()
         self.get_frame(0)
 
-    def start_colocalisation_thread(self):
-        params = self.prepare_parameters()
+    def start_filter_thread(self):
+        params = self.prepare_parameters(segment=False)
+        self.ui.result_radio.setChecked(True)
+        self.ui.movie_radio.setChecked(False)
         if params['overlap'] == 0.0:
             self.handle_colocalisation_reset()
         else:
-            self.coloc_worker = ColocWorker(self)
-            self.coloc_worker.progress_signal.connect(self.update_progress)
-            self.coloc_worker.results_signal.connect(
-                self.colocalisation_plotter)
-            self.coloc_worker.start_thread(self.segmentation_result, params)
+            self.obcol_worker.results_signal.connect(
+                self.filter_plotter)
+            self.obcol_worker.start_thread(self.segmentation_result, params)
 
-    def colocalisation_plotter(self, result):
+    def filter_plotter(self, result):
         self.is_colocalisation = True
         self.colocalisation_result = result
         self.ui.progress_bar.setValue(0)
@@ -457,7 +574,7 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.curr_frame = 0
         if (self.curr_frame >= self.num_frames):
             self.curr_frame = self.num_frames - 1
-        if self.is_movie or self.is_result:
+        if self.is_movie or self.is_segmentation:
             self.display_frame()
 
     def quit(self):
