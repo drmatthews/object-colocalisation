@@ -16,7 +16,7 @@ from matplotlib.figure import Figure
 
 from tifffile import imread, imsave
 import utils
-from threads import ObcolWorker, FilterWorker, SaveWorker
+from threads import ObcolWorker, SaveWorker
 
 os.environ["QT_API"] = "pyqt4"
 
