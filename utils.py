@@ -14,6 +14,12 @@ from multiprocessing import Pool, Manager, cpu_count
 
 
 class Frame:
+    """A single frame of a movie. Used as an abstraction of a numpy array
+    extracted from a TIF file (specifically a timelapse microscopy data
+    sequence) read using the tifffile module. The Frame object stores
+    information about the size and shape of the input array and information
+    relating to the segmentation of image (the labels attribute).
+    """
     def __init__(self, frame_id, im):
         self.img = im
         self.frame_id = frame_id
@@ -31,7 +37,13 @@ class Frame:
         self.size_range = ()
 
     def segment(self, channels, thresholds, size_range):
-        """Colocalise objects (patches) after watershed segmentation
+        """Segments objects in the numpy representation of the Frame object.
+
+        Input: channels -   a list of channel indices in the numpy
+                            representation)
+               thresholds - a list of grey level thresholds for masking
+               size_range - a tuple holding the min and max size in pixels for
+                            objects retained by the segmentation
         """
         self.channels_to_overlap = channels
         self.thresholds_for_segmentation = thresholds
@@ -46,7 +58,11 @@ class Frame:
             return None
 
     def locate(self, channel, threshold, size_range):
-        """Watershed segmentation of the image
+        """Wavelet noise filtering followed by watershedding.
+        Input: channel    - a index in the numpy array representation
+               threshold  - the grey level threshold for that channel
+               size_range - a tuple of min and max size in pixels for objects
+                            to be retained by the segmentation
         """
         (filtered, thresh) = self._wavelet_filter(
             self.img[channel, :, :], threshold=threshold)
@@ -55,8 +71,12 @@ class Frame:
         self._label_properties(self.labels, self.img, channel, size_range)
 
     def object_colocalisation(self, channels, overlap):
-        """Identifies the overlapping objects in two segmented channels.
-        The amount of overlap is specified by the user.
+        """Determines how much overlap there is in segmented objects represented
+        by the labels attribute.
+        Input: channels - a list of indices in the numpy representation of the
+                          of the channels where we want to determine the
+                          overlap
+               overlap  - the minimum amount of overlap to look for
         """
         rlabels = self.labels[channels[0], :, :]
         glabels = self.labels[channels[1], :, :]
@@ -74,6 +94,10 @@ class Frame:
     def mono_labels(self, channel, filtered=False):
         """Used when display overlapping labels. Sets all labels to 255 for the
         selected channel.
+        Input: channel  - the index of the channel we want to display
+               filtered - a boolean indicating whether to display all the
+                          segmented labels or just those with an overlap
+                          greater than the mimimum value
         """
         if filtered:
             labels = self.filtered_labels[channel, :, :].copy()
@@ -85,6 +109,9 @@ class Frame:
 
     def _sk_watershed(self, image, radius=1.0):
         """Does the watershed segmentation of an image using scikit-image.
+        Input: image  - a numpy representation of the data being segmented
+               radius - the radius in pixels to use when creating a binary
+                        mask
         """
         footprint = self._binary_mask(radius)
         distance = ndi.distance_transform_edt(image)
@@ -100,6 +127,11 @@ class Frame:
     def _label_properties(self, labels, image, channel, size_range):
         """Uses scikit-image regionprops to make measurements of segmented objects
         and creates a collection of Patch objects.
+        Input: labels     - the numpy labelled array returned by watershedding
+               image      - the numpy representation of the data
+                            being segmented
+               channel    - index in input image that has been segmented
+               size_range - the min and max pixel size of objects to retain
         """
         props = regionprops(labels[channel, :, :], image[channel, :, :])
         patches = Patches()
@@ -119,7 +151,8 @@ class Frame:
         self.patches[channel] = patches
 
     def _threshold_image(self, image, thresh):
-        """Returns a boolean ndarray
+        """Returns a boolean ndarray with True where the pixel
+        grey level in the input image is above the threshold value
         """
         return image > thresh
 
@@ -196,20 +229,28 @@ class Frame:
             channel_labels[lidx] = 0
 
     def _identify_patch(self, label_id, channel):
+        """Return a Patch object for the specified label_id
+        in the specified channel"""
         pout = [patch for patch in self.patches[channel]
                 if patch.id == label_id]
         return pout[0]
 
     def sizes_of_patches(self, channel):
+        """For a given channel return the sizes of all the Patches"""
         return self.patches[channel].get_sizes()
 
     def signals_of_patches(self, channel):
+        """For a given channel return the intensity of the Patches"""
         return self.patches[channel].get_signals()
 
     def fraction_of_patch_overlapped(self, channel):
+        """For a given channel return the amount of overlap for each
+        Patch in the channels of interest"""
         return self.patches[channel].get_overlap_fraction()
 
     def get_fraction_overlapped(self, channel):
+        """For a given channel return the fraction of objects in the Frame
+        that have an overlap above the mimimum specified"""
         return self.patches[channel].fraction_with_overlap
 
 
