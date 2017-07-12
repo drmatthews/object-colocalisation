@@ -4,6 +4,8 @@ import os
 from PyQt4.QtCore import QThread
 from PyQt4.QtCore import Signal
 import pandas as pd
+import numpy as np
+from tifffile import imsave
 from multiprocessing import Pool, Manager, cpu_count
 
 import utils
@@ -147,6 +149,8 @@ class SaveWorker(QThread):
 
     def save(self):
         frames = self.data
+        movie_array = np.zeros(
+            (len(frames), 2, frames[0].height, frames[0].width))
         movie_path = self.path
         channels = self.channels
         basepath = os.path.dirname(movie_path)
@@ -158,6 +162,7 @@ class SaveWorker(QThread):
         for c, channel in enumerate(channels):
             output = []
             for frame_id, frame in enumerate(frames):
+                movie_array[frame_id, c, :, :] = frame.mono_labels(channel)
                 self.progress_signal.emit(counter)
                 for patch in frame.patches[channel]:
                     output.append(
@@ -183,4 +188,9 @@ class SaveWorker(QThread):
                 df.to_excel(
                     writer, sheet_name=channel_names[c], index=False)
                 counter += 1
+        imsave(
+            os.path.join(basepath, basename + '_segmented.tif'),
+            movie_array.astype(np.uint8),
+            compress=6,
+            metadata={'axes': 'TCYX'})
         writer.save()

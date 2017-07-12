@@ -421,6 +421,9 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.movie = utils.generate_frames(movie_array)
             if movie_array.ndim == 4:
                 self.is_movie = True
+                self.is_segmentation = False
+                self.is_colocalisation = False
+
                 self.num_frames = movie_array.shape[0]
                 self.num_channels = movie_array.shape[1]
                 self.height = movie_array.shape[2]
@@ -455,6 +458,20 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.ui.green_channel_spinbox.setMaximum(self.num_channels - 1)
                 self.ui.movie_radio.setChecked(True)
                 self.ui.result_radio.setChecked(False)
+
+                # reset everything
+                self.curr_frame = 0
+                self.old_f = 1
+                self.old_coloc_f = 1
+                self.curr_channel = 0
+                self.segmentation_result = []
+                self.colocalisation_result = []
+                self.ui.channel_spinbox.setValue(0)
+                self.ui.frame_slider.setValue(0)
+                self.ui.coloc_frame_slider.setValue(0)
+                self.ui.red_channel_spinbox.setValue(0)
+                self.ui.green_channel_spinbox.setValue(0)
+
                 self.get_frame(0)
                 self.ui.progress_bar.setMaximum(self.num_frames)
             else:
