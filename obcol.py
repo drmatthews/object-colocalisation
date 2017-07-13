@@ -324,11 +324,11 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
-        frame = utils.load_frame(self.movie, self.curr_frame)
+        frame_array = utils.load_array(self.movie, self.curr_frame)
         self.fmin = float(
-            np.min(frame[self.curr_channel, :, :]))
+            np.min(frame_array[self.curr_channel, :, :]))
         self.fmax = float(
-            np.max(frame[self.curr_channel, :, :]))
+            np.max(frame_array[self.curr_channel, :, :]))
         self.ui.fmax_slider.setValue(self.fmax)
         self.ui.threshold_spinbox.setValue(self.thresholds[self.curr_channel])
         self.ui.threshold_slider.setValue(self.thresholds[self.curr_channel])
@@ -562,7 +562,7 @@ class MainGUIWindow(QtGui.QMainWindow):
     # controllers
     def display_frame(self):
         if self.is_movie:
-            current_frame = utils.load_frame(self.movie, self.curr_frame)
+            current_frame = utils.load_array(self.movie, self.curr_frame)
             frame = (
                 np.ascontiguousarray(
                     current_frame[self.curr_channel, :, :]))
@@ -572,14 +572,14 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.fmax,
                 self.thresholds[self.curr_channel])
         if self.is_segmentation:
-            current_labels = utils.load_frame_labels(
+            current_labels = utils.get_mono_labels(
                 self.segmentation_result, self.curr_frame)
             frame = (
                 np.ascontiguousarray(current_labels))
             self.movie_view.show_segmentation_frame(frame)
             self.coloc_view.show_segmentation_frame(frame)
         if self.is_colocalisation:
-            current_labels = utils.load_frame_labels(
+            current_labels = utils.get_mono_labels(
                 self.colocalisation_result, self.curr_frame, filtered=True)
             filtered = (
                 np.ascontiguousarray(current_labels))

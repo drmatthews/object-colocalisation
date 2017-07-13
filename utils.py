@@ -349,14 +349,14 @@ def generate_frames(movie_array):
         return movie_list
 
 
-def load_frame(movie, frame_id):
+def load_array(movie, frame_id):
     """Return the numpy array representation of the Frame
     object for GUI image display
     """
     return movie[frame_id].img
 
 
-def load_frame_labels(results, frame_id, filtered=False):
+def get_mono_labels(results, frame_id, filtered=False):
     frame = results[frame_id]
     channels = frame.channels_to_overlap
     labels = np.zeros((2, frame.height, frame.width))
