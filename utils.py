@@ -20,11 +20,11 @@ class Frame:
     information about the size and shape of the input array and information
     relating to the segmentation of image (the labels attribute).
     """
-    def __init__(self, frame_id, im):
-        self.img = im
+    def __init__(self, frame_id, img):
+        self.img = img
         self.frame_id = frame_id
-        self.num_channels, self.height, self.width = im.shape
-        self.dtype = im.dtype
+        self.num_channels, self.height, self.width = img.shape
+        self.dtype = img.dtype
         self.thresholds_for_segmentation = []
         self.labels = np.zeros(
             (self.num_channels, self.height, self.width), dtype=np.uint8)
@@ -35,6 +35,46 @@ class Frame:
         self.green_overlaps = []
         self.patches = {}
         self.size_range = ()
+
+    def get_image(self):
+        return self.img
+
+    def get_labels(self):
+        return self.labels
+
+    def get_labels_in_channel(self, channel):
+        return self.labels[channel, :, :]
+
+    def get_mono_labels_in_channel(self, channel, filtered=False):
+        """Used when display overlapping labels. Sets all labels to 255 for the
+        selected channel.
+        Input: channel  - the index of the channel we want to display
+               filtered - a boolean indicating whether to display all the
+                          segmented labels or just those with an overlap
+                          greater than the mimimum value
+        """
+        if filtered:
+            labels = self.filtered_labels[channel, :, :].copy()
+        else:
+            labels = self.labels[channel, :, :].copy()
+        lidx = labels > 0
+        labels[lidx] = 255
+        return labels
+
+    def get_mono_labels(self, filtered=False):
+        """Used when display overlapping labels. Sets all labels to 255 for the
+        selected channel.
+        Input: channel  - the index of the channel we want to display
+               filtered - a boolean indicating whether to display all the
+                          segmented labels or just those with an overlap
+                          greater than the mimimum value
+        """
+        channels = self.channels_to_overlap
+        labels = np.zeros((2, self.height, self.width))
+        for channel in range(2):
+            labels[channel, :, :] = (
+                self.get_mono_labels_in_channel(channels[channel], filtered))
+        return labels
 
     def segment(self, channels, thresholds, size_range):
         """Segments objects in the numpy representation of the Frame object.
@@ -90,22 +130,6 @@ class Frame:
             self.filtered_labels[channels[0], :, :], self.red_overlaps)
         self._keep_overlapped_labels(
             self.filtered_labels[channels[1], :, :], self.green_overlaps)
-
-    def mono_labels(self, channel, filtered=False):
-        """Used when display overlapping labels. Sets all labels to 255 for the
-        selected channel.
-        Input: channel  - the index of the channel we want to display
-               filtered - a boolean indicating whether to display all the
-                          segmented labels or just those with an overlap
-                          greater than the mimimum value
-        """
-        if filtered:
-            labels = self.filtered_labels[channel, :, :].copy()
-        else:
-            labels = self.labels[channel, :, :].copy()
-        lidx = labels > 0
-        labels[lidx] = 255
-        return labels
 
     def _sk_watershed(self, image, radius=1.0):
         """Does the watershed segmentation of an image using scikit-image.
@@ -348,33 +372,16 @@ def generate_frames(movie_array):
             movie_list.append(Frame(frame, movie_array[frame, :, :, :]))
         return movie_list
 
-
-def load_array(movie, frame_id):
-    """Return the numpy array representation of the Frame
-    object for GUI image display
-    """
-    return movie[frame_id].img
-
-
-def get_mono_labels(results, frame_id, filtered=False):
-    frame = results[frame_id]
-    channels = frame.channels_to_overlap
-    labels = np.zeros((2, frame.height, frame.width))
-    for channel in range(2):
-        labels[channel, :, :] = (
-            frame.mono_labels(channels[channel], filtered))
-    return labels
-
 #
 # for running colocalisation sequentially
 #
 
 
-def object_colocalisation(movie, params, size_range=(None, None)):
+def object_colocalisation(movie, params):
     """Colocalise frames in a movie instance using parameters
     defined in the parameter list
     """
-    channels, thresholds, overlap = params
+    channels, thresholds, overlap, size_range = params
     results = []
     for i, frame in enumerate(movie):
         frame.segment(channels, thresholds, size_range)
@@ -503,15 +510,17 @@ if __name__ == '__main__':
     size_range = (1, 100000)
     params = [channels, thresholds, overlap, size_range]
 
-    results = run(movie, params)
-    overlap = 0.2
-    params = [channels, thresholds, overlap, size_range]
-    filtered = run(results, params, segment=False)
+    # results = run(movie, params)
+    # overlap = 0.2
+    # params = [channels, thresholds, overlap, size_range]
+    # filtered = run(results, params, segment=False)
 
-    plt.figure()
-    plt.imshow(results[0].mono_labels(0), interpolation='nearest')
-    plt.show()
+    # plt.figure()
+    # plt.imshow(results[0].get_mono_labels_in_channel(0), interpolation='nearest')
+    # plt.show()
 
-    plt.figure()
-    plt.imshow(filtered[0].mono_labels(0, filtered=True), interpolation='nearest')
-    plt.show()
+    # plt.figure()
+    # plt.imshow(filtered[0].get_mono_labels_in_channel(0, filtered=True), interpolation='nearest')
+    # plt.show()
+
+    results = object_colocalisation(movie, params)

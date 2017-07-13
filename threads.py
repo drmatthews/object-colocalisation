@@ -162,7 +162,9 @@ class SaveWorker(QThread):
         for c, channel in enumerate(channels):
             output = []
             for frame_id, frame in enumerate(frames):
-                movie_array[frame_id, c, :, :] = frame.mono_labels(channel)
+                movie_array[frame_id, c, :, :] = (
+                    frame.get_mono_labels_in_channel(channel))
+
                 self.progress_signal.emit(counter)
                 for patch in frame.patches[channel]:
                     output.append(
