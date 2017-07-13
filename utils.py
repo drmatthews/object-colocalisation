@@ -20,9 +20,11 @@ class Frame:
     information about the size and shape of the input array and information
     relating to the segmentation of image (the labels attribute).
     """
-    def __init__(self, frame_id, img):
+    frame_num = 0
+
+    def __init__(self, img):
         self.img = img
-        self.frame_id = frame_id
+        self.frame_id = Frame.frame_num
         self.num_channels, self.height, self.width = img.shape
         self.dtype = img.dtype
         self.thresholds_for_segmentation = []
@@ -35,6 +37,7 @@ class Frame:
         self.green_overlaps = []
         self.patches = {}
         self.size_range = ()
+        Frame.frame_num += 1
 
     def get_image(self):
         return self.img
@@ -369,7 +372,7 @@ def generate_frames(movie_array):
         num_frames = movie_array.shape[0]
         movie_list = []
         for frame in range(num_frames):
-            movie_list.append(Frame(frame, movie_array[frame, :, :, :]))
+            movie_list.append(Frame(movie_array[frame, :, :, :]))
         return movie_list
 
 #
