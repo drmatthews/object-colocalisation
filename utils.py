@@ -296,12 +296,21 @@ class Patch(object):
         intensity_image = parameters[4]
         self.intensity = np.sum(intensity_image)
         self.channel = parameters[5]
-        self.fraction_overlapped = 0.0
         self.size_overlapped = 0.0
+        self.fraction_overlapped = 0.0
+        if len(parameters) > 5:
+            self.size_overlapped = parameters[6]
+            self.fraction_overlapped = parameters[7]
         self.signal = 0.0
 
     def __str__(self):
-        return "Patch {} of size {}".format(self.id, self.size)
+        return "Patch {}\nchannel: {}\nsize:{}\n"\
+               "intensity: {}\nfraction overlapped: {}"\
+               .format(self.id,
+                       self.channel,
+                       self.size,
+                       self.intensity,
+                       self.fraction_overlapped)
 
 
 class Patches(object):
@@ -533,7 +542,9 @@ def generate_patches(df):
                  int(row['size'].item()),
                  (row['centroid x'].item(), row['centroid y'].item()),
                  int(row['intensity']),
-                 int(row['channel'].item())]))
+                 int(row['channel'].item()),
+                 int(row['size overlapped'].item()),
+                 row['fraction overlapped'].item()]))
         frames.append(patches)
     return frames
 
