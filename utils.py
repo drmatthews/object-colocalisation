@@ -13,7 +13,7 @@ from wavelet_denoise import wavelet_filter as wf
 from multiprocessing import Pool, Manager, cpu_count
 
 
-class Frame:
+class Frame(object):
     """A single frame of a movie. Used as an abstraction of a numpy array
     extracted from a TIF file (specifically a timelapse microscopy data
     sequence) read using the tifffile module. The Frame object stores
@@ -281,7 +281,7 @@ class Frame:
         return self.patches[channel].fraction_with_overlap
 
 
-class Patch:
+class Patch(object):
     """A patch is an abstraction of a label generate by watershed segmentation
     of a wavelet denoised image. It is used as a way of collecting measurements
     of the segmented objects.
@@ -299,7 +299,7 @@ class Patch:
         self.signal = 0.0
 
 
-class Patches:
+class Patches(object):
     """
     A collection of Patch objects
     """
@@ -396,7 +396,7 @@ def object_colocalisation(movie, params):
 #
 
 
-class Parameters:
+class Parameters(object):
     def __init__(self,
                  frame,
                  channels,
