@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import time
 from scipy import ndimage as ndi
@@ -298,23 +300,34 @@ class Patch(object):
         self.size_overlapped = 0.0
         self.signal = 0.0
 
+    def __str__(self):
+        return "Patch {} of size {}".format(self.id, self.size)
+
 
 class Patches(object):
     """
     A collection of Patch objects
     """
-    def __init__(self, path=None):
+    def __init__(self):
         self.patches = []
         self.num_patches = 0
         self.total_signal = 0
         self.total_size = 0
         self.fraction_with_overlap = None
-        if path:
-            self.path = path
-            self.__read(path)
 
     def __getitem__(self, key):
         return self.patches[key]
+
+    def __len__(self):
+        return len(self.patches)
+
+    def __str__(self):
+        return "collection of Patch objects of length {}"\
+            .format(self.num_patches)
+
+    def __repr__(self):
+        return "collection of Patch objects of length {}"\
+            .format(self.num_patches)
 
     def add(self, patch):
         self.patches.append(patch)
@@ -504,6 +517,47 @@ def run(movie, parameters, segment=True):
     print(toc3 - tic3)
     return results[0]
 
+#
+# helpers for importing data from xls
+#
+
+
+def generate_patches(df):
+    frames = []
+    for gid, group in df.groupby('frame id'):
+        patches = Patches()
+        for rid, row in group.iterrows():
+            patches.add(Patch(
+                [int(row['patch id'].item()),
+                 None,
+                 int(row['size'].item()),
+                 (row['centroid x'].item(), row['centroid y'].item()),
+                 int(row['intensity']),
+                 int(row['channel'].item())]))
+        frames.append(patches)
+    return frames
+
+
+def get_channels_from_path(path):
+    cidx = path.find('channels') + 9
+    return [int(i) for i in list(path[cidx: cidx + 2])]
+
+
+def read_sheet(path, sheetname):
+    return pd.read_excel(path, sheetname=sheetname)
+
+
+def read_patches_from_file(path):
+    if path.endswith('xlsx'):
+        sheets = ['red', 'green']
+        channels = get_channels_from_path(path)
+        patches = {}
+        for c, channel in enumerate(channels):
+            patches[channel] = generate_patches(read_sheet(path, sheets[c]))
+        return patches
+    else:
+        raise ValueError("Input data must be in Excel format")
+
 
 if __name__ == '__main__':
 
@@ -529,4 +583,7 @@ if __name__ == '__main__':
     # plt.imshow(filtered[0].get_mono_labels_in_channel(0, filtered=True), interpolation='nearest')
     # plt.show()
 
-    results = object_colocalisation(movie, params)
+    # results = object_colocalisation(movie, params)
+    patches = read_patches_from_file("WT_channels_20_obcol.xlsx")
+    red = patches[0]
+    print(red[0][0])
