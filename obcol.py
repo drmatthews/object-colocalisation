@@ -53,13 +53,15 @@ class HistogramView(QtGui.QWidget):
         if data_type == 0:  # sizes
             plot_data = data.sizes_of_patches(channel)
             self.ax.set_xlabel('Size of overlap [pixels]')
+            self.ax.hist(plot_data, range=(1, max(plot_data)))
         if data_type == 1:  # fraction
             plot_data = data.fraction_of_patch_overlapped(channel)
             self.ax.set_xlabel('Size of overlap [%]')
+            self.ax.hist(plot_data, range=(0, max(plot_data)))
         elif data_type == 2:  # signals
             plot_data = data.signals_of_patches(channel)
             self.ax.set_xlabel('Total grey levels in overlap region')
-        self.ax.hist(plot_data, range=(1, max(plot_data)))
+            self.ax.hist(plot_data, range=(1, max(plot_data)))
         self.fig.tight_layout()
         self.canvas.draw()
 
@@ -321,6 +323,8 @@ class MainGUIWindow(QtGui.QMainWindow):
             else:
                 self.get_frame(-1)
             self.old_coloc_f = curr_f
+            data_type = self.ui.data_combobox.currentIndex()
+            self.update_histogram(data_type)
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
@@ -401,15 +405,18 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.max_size_spinbox_2.setValue(value)
 
     def handle_data_combo(self, value):
-        coloc_channel = self.ui.channel_combobox.currentIndex()
-        channel = self.params['channels'][coloc_channel]
-        data = self.segmentation_result[self.curr_frame]
-        self.histogram_view.draw(data, value, channel)
+        self.update_histogram(value)
 
     def update_display(self):
         self.fmin = float(self.ui.fmin_slider.value())
         self.fmax = float(self.ui.fmax_slider.value())
         self.display_frame()
+
+    def update_histogram(self, data_type):
+        coloc_channel = self.ui.channel_combobox.currentIndex()
+        channel = self.params['channels'][coloc_channel]
+        data = self.segmentation_result[self.curr_frame]
+        self.histogram_view.draw(data, data_type, channel)
 
     def load_movie(self):
         self.movie_path = (

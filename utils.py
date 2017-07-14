@@ -107,11 +107,11 @@ class Frame(object):
                size_range - a tuple of min and max size in pixels for objects
                             to be retained by the segmentation
         """
-        (filtered, thresh) = self._wavelet_filter(
+        (filtered, thresh) = self.__wavelet_filter(
             self.img[channel, :, :], threshold=threshold)
-        self.labels[channel, :, :] = self._sk_watershed(filtered)
+        self.labels[channel, :, :] = self.__sk_watershed(filtered)
 
-        self._label_properties(self.labels, self.img, channel, size_range)
+        self.__label_properties(self.labels, self.img, channel, size_range)
 
     def object_colocalisation(self, channels, overlap):
         """Determines how much overlap there is in segmented objects represented
@@ -123,24 +123,24 @@ class Frame(object):
         """
         rlabels = self.labels[channels[0], :, :]
         glabels = self.labels[channels[1], :, :]
-        self.red_overlaps = self._find_indices_of_overlaps(
+        self.red_overlaps = self.__find_indices_of_overlaps(
             rlabels, glabels, channels[0], overlap)
-        self.green_overlaps = self._find_indices_of_overlaps(
+        self.green_overlaps = self.__find_indices_of_overlaps(
             glabels, rlabels, channels[1], overlap)
 
         self.filtered_labels = self.labels.copy()
-        self._keep_overlapped_labels(
+        self.__keep_overlapped_labels(
             self.filtered_labels[channels[0], :, :], self.red_overlaps)
-        self._keep_overlapped_labels(
+        self.__keep_overlapped_labels(
             self.filtered_labels[channels[1], :, :], self.green_overlaps)
 
-    def _sk_watershed(self, image, radius=1.0):
+    def __sk_watershed(self, image, radius=1.0):
         """Does the watershed segmentation of an image using scikit-image.
         Input: image  - a numpy representation of the data being segmented
                radius - the radius in pixels to use when creating a binary
                         mask
         """
-        footprint = self._binary_mask(radius)
+        footprint = self.__binary_mask(radius)
         distance = ndi.distance_transform_edt(image)
         coords = plm(
             distance,
@@ -151,7 +151,7 @@ class Frame(object):
         markers = label(coords)
         return label(watershed(-distance, markers, mask=image), connectivity=2)
 
-    def _label_properties(self, labels, image, channel, size_range):
+    def __label_properties(self, labels, image, channel, size_range):
         """Uses scikit-image regionprops to make measurements of segmented objects
         and creates a collection of Patch objects.
         Input: labels     - the numpy labelled array returned by watershedding
@@ -177,13 +177,13 @@ class Frame(object):
 
         self.patches[channel] = patches
 
-    def _threshold_image(self, image, thresh):
+    def __threshold_image(self, image, thresh):
         """Returns a boolean ndarray with True where the pixel
         grey level in the input image is above the threshold value
         """
         return image > thresh
 
-    def _binary_mask(self, radius, ndim=2, separation=None):
+    def __binary_mask(self, radius, ndim=2, separation=None):
         """circular mask in a square array for use in scipy peak_local_max
         """
         points = np.arange(-radius, radius + 1)
@@ -194,7 +194,7 @@ class Frame(object):
         r = np.sqrt(np.sum(coords ** 2, 0))
         return r <= radius
 
-    def _wavelet_filter(self, image, threshold=None):
+    def __wavelet_filter(self, image, threshold=None):
         """Wavelet denoising of the input image
         """
         cwf = wf.CompoundWaveletFilter(3, 2.0)
@@ -203,12 +203,12 @@ class Frame(object):
         if threshold is None:
             threshold = np.std(cwf.result_f1)
 
-        mask = self._threshold_image(image, threshold)
+        mask = self.__threshold_image(image, threshold)
         masked = filtered * mask
 
         return (masked, threshold)
 
-    def _find_indices_of_overlaps(
+    def __find_indices_of_overlaps(
             self, first_labels, second_labels, channel, overlap):
         """Does the actual work of finding the overlaps between
         segmented objects in the two chosen channels.
@@ -230,7 +230,7 @@ class Frame(object):
                 overlap_size = float(len(np.where(pix > 0)[0]))
 
                 # identify the Patch object that belongs to this region
-                patch = self._identify_patch(flabel, channel)
+                patch = self.__identify_patch(flabel, channel)
 
                 # calculate the colocalisation parameters for that patch
                 patch.fraction_overlapped = overlap_size / patch.size
@@ -246,7 +246,7 @@ class Frame(object):
         self.patches[channel].calculate_fraction_overlapped()
         return overlapping
 
-    def _keep_overlapped_labels(self, channel_labels, label_ids):
+    def __keep_overlapped_labels(self, channel_labels, label_ids):
         """Determine which labels to keep for display
         """
         uids = list(np.unique(channel_labels))
@@ -255,7 +255,7 @@ class Frame(object):
             lidx = np.where(channel_labels == label_id)
             channel_labels[lidx] = 0
 
-    def _identify_patch(self, label_id, channel):
+    def __identify_patch(self, label_id, channel):
         """Return a Patch object for the specified label_id
         in the specified channel"""
         pout = [patch for patch in self.patches[channel]
@@ -303,12 +303,15 @@ class Patches(object):
     """
     A collection of Patch objects
     """
-    def __init__(self):
+    def __init__(self, path=None):
         self.patches = []
         self.num_patches = 0
         self.total_signal = 0
         self.total_size = 0
         self.fraction_with_overlap = None
+        if path:
+            self.path = path
+            self.__read(path)
 
     def __getitem__(self, key):
         return self.patches[key]

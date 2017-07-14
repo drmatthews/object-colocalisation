@@ -155,7 +155,12 @@ class SaveWorker(QThread):
         channels = self.channels
         basepath = os.path.dirname(movie_path)
         basename = os.path.splitext(movie_path)[0]
-        path = os.path.join(basepath, basename + '_obcol.xlsx')
+
+        channel_str = "_channels_"
+        for channel in channels:
+            channel_str += str(channel)
+
+        path = os.path.join(basepath, basename + channel_str + '_obcol.xlsx')
         writer = pd.ExcelWriter(path)
         channel_names = ["red", "green"]
         counter = 0
@@ -175,7 +180,8 @@ class SaveWorker(QThread):
                          patch.intensity,
                          patch.channel,
                          patch.size,
-                         patch.size_overlapped])
+                         patch.size_overlapped,
+                         float(patch.size_overlapped) / float(patch.size)])
 
                 df = pd.DataFrame(output)
                 df.columns = [
@@ -186,12 +192,13 @@ class SaveWorker(QThread):
                     "intensity",
                     "channel",
                     "size",
-                    "size overlapped"]
+                    "size overlapped",
+                    "fraction overlapped"]
                 df.to_excel(
                     writer, sheet_name=channel_names[c], index=False)
                 counter += 1
         imsave(
-            os.path.join(basepath, basename + '_segmented.tif'),
+            os.path.join(basepath, basename + channel_str + '_segmented.tif'),
             movie_array.astype(np.uint8),
             compress=6,
             metadata={'axes': 'TCYX'})
