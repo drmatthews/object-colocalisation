@@ -21,6 +21,63 @@ from threads import ObcolWorker, SaveWorker
 os.environ["QT_API"] = "pyqt4"
 
 
+class ImportList(QtGui.QWidget):
+
+    def __init__(self, parent=None, list_widget=None):
+        super(ImportList, self).__init__(parent)
+        self.parent = parent
+        self.list_widget = list_widget
+        self.list_widget.clicked.connect(self.item_selected)
+
+    def update(self, import_list):
+        if import_list:
+            self.list_widget.data = import_list
+            self.list_widget.clear()
+            for val in import_list:
+                self.list_widget.addItem(os.path.basename(str(val)))
+
+    def item_selected(self, id):
+        item = self.list_widget.data[id.row()]
+
+
+class AnalysisView(QtGui.QWidget):
+    def __init__(self, parent):
+        super(AnalysisView, self).__init__(parent.ui.analysis_plot_groupbox)
+        self.parent = parent
+        dpi = 100.0
+        self.fig = Figure((512.0 / dpi, 512.0 / dpi), dpi=dpi)
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setParent(parent.ui.analysis_plot_groupbox)
+
+        self.ax = self.fig.add_subplot(111)
+        self.mpl_toolbar = NavigationToolbar(
+            self.canvas, parent.ui.analysis_plot_groupbox, coordinates=False)
+
+        vbox = QtGui.QVBoxLayout()
+        vbox.addWidget(self.canvas)
+        vbox.addWidget(self.mpl_toolbar)
+
+        parent.ui.analysis_plot_groupbox.setLayout(vbox)
+        self.mpl_toolbar.hide()
+        self.canvas.hide()
+
+    def draw(self, data, data_type, channel):
+        self.canvas.show()
+        self.mpl_toolbar.show()
+        self.ax.clear()
+        self.ax.grid(True)
+        if data_type == 0:
+            x_data = [i for i in range(len(data[channel]))]
+            y_data = []
+            for frame in data[channel]:
+                y_data.append(frame.fraction_with_overlap)
+
+        print(x_data, y_data)
+        self.ax.plot(x_data, y_data)
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+
 class HistogramView(QtGui.QWidget):
     def __init__(self, parent):
         super(HistogramView, self).__init__(parent.ui.histogram_groupbox)
@@ -231,11 +288,14 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.movie_view = MovieView(self, self.ui.movie_groupbox)
         self.coloc_view = ColocView(self, self.ui.coloc_groupbox)
         # self.table_widget = ResultsTable(self, self.ui.results_table)
+        self.list_view = ImportList(self, self.ui.import_list_widget)
         self.histogram_view = HistogramView(self)
+        self.analysis_view = AnalysisView(self)
         # self.table_widget.hide()
 
         # parameters
         self.directory = ""
+        self.import_directory = ""
         self.curr_frame = 0
         self.old_f = 1
         self.old_coloc_f = 1
@@ -255,6 +315,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.open_button.clicked.connect(self.load_movie)
         self.ui.save_button.clicked.connect(self.save)
         self.ui.quit_button.clicked.connect(self.quit)
+        self.ui.import_button.clicked.connect(self.import_patches)
         self.ui.frame_slider.valueChanged.connect(
             self.handle_frame_slider)
         self.ui.coloc_frame_slider.valueChanged.connect(
@@ -493,6 +554,19 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.segmentation_result,
                 self.params['channels'],
                 self.movie_path)
+
+    def import_patches(self):
+        self.import_paths = (
+            QtGui.QFileDialog.getOpenFileNames(
+                self, "Load Data", self.import_directory, "*.xlsx"))
+        if self.import_paths and len(self.import_paths) < 5:
+            self.list_view.update(self.import_paths)
+            # note to self - you will need a separate thread for this
+            self.imported_data = []
+            for path in self.import_paths:
+                self.imported_data.append(
+                    utils.read_patches_from_file(str(path)))
+            self.analysis_view.draw(self.imported_data[0], 0, 0)
 
     def prepare_parameters(self, segment=True):
         red_chan = int(self.ui.red_channel_spinbox.value())

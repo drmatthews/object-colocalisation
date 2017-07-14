@@ -545,6 +545,7 @@ def generate_patches(df):
                  int(row['channel'].item()),
                  int(row['size overlapped'].item()),
                  row['fraction overlapped'].item()]))
+        patches.calculate_fraction_overlapped()
         frames.append(patches)
     return frames
 
