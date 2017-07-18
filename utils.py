@@ -237,15 +237,15 @@ class Frame(object):
                 # calculate the colocalisation parameters for that patch
                 patch.fraction_overlapped = overlap_size / patch.size
                 patch.size_overlapped = patch.size * patch.fraction_overlapped
-                patch.signal = patch.intensity * patch.size_overlapped
-
+                patch.signal = patch.intensity * patch.fraction_overlapped
+                print(patch.signal)
                 # keep the indices of the overlapped region for filtering
                 # objects in the GUI
                 if (np.any(pix) > 0 and overlap > 0.0):
                     if (overlap_size > object_size * overlap):
                         overlapping.append(flabel)
 
-        self.patches[channel].calculate_fraction_overlapped()
+        self.patches[channel].calculate_overlap_fraction()
         return overlapping
 
     def __keep_overlapped_labels(self, channel_labels, label_ids):
@@ -280,7 +280,7 @@ class Frame(object):
     def get_fraction_overlapped(self, channel):
         """For a given channel return the fraction of objects in the Frame
         that have an overlap above the mimimum specified"""
-        return self.patches[channel].fraction_with_overlap
+        return self.patches[channel].overlap_fraction
 
 
 class Patch(object):
@@ -320,9 +320,9 @@ class Patches(object):
     def __init__(self):
         self.patches = []
         self.num_patches = 0
-        self.total_signal = 0
-        self.total_size = 0
-        self.fraction_with_overlap = None
+        self.total_signal = 0.0
+        self.total_size = 0.0
+        self.overlap_fraction = None
 
     def __getitem__(self, key):
         return self.patches[key]
@@ -341,17 +341,33 @@ class Patches(object):
     def add(self, patch):
         self.patches.append(patch)
         self.num_patches = len(self.patches)
-        self.total_size += patch.size
-        self.total_signal += (patch.intensity * patch.size)
+        self.total_size += float(patch.size)
+        self.total_signal += float(patch.intensity * patch.size)
 
-    def calculate_fraction_overlapped(self):
+    def calculate_overlap_fraction(self):
         has_overlap = []
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
                 has_overlap.append(patch)
 
-        self.fraction_with_overlap = (
+        self.overlap_fraction = (
             float(len(has_overlap)) / float(len(self.patches)))
+
+    def calculate_overlap_size(self):
+        sizes = 0.0
+        for patch in self.patches:
+            if patch.fraction_overlapped > 0.0:
+                sizes += float(patch.size) * patch.fraction_overlapped
+
+        self.overlap_size = sizes / self.total_size
+
+    def calculate_overlap_signal(self):
+        signal = 0.0
+        for patch in self.patches:
+            if patch.fraction_overlapped > 0.0:
+                signal += float(patch.intensity) * patch.fraction_overlapped
+
+        self.overlap_signal = signal / self.total_signal
 
     def labelled_image(self, shape, dtype):
         img = np.zeros(shape, dtype=dtype)
@@ -545,7 +561,9 @@ def generate_patches(df):
                  int(row['channel'].item()),
                  int(row['size overlapped'].item()),
                  row['fraction overlapped'].item()]))
-        patches.calculate_fraction_overlapped()
+        patches.calculate_overlap_fraction()
+        patches.calculate_overlap_size()
+        patches.calculate_overlap_signal()
         frames.append(patches)
     return frames
 

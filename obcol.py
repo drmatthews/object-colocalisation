@@ -8,15 +8,18 @@ import os
 import numpy as np
 
 from matplotlib import pyplot as plt
+from itertools import cycle
 # matplotlib.use("Qt4Agg") # must be called before .backends or .pylab
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar)
 from matplotlib.figure import Figure
 
-from tifffile import imread, imsave
+from tifffile import imread
 import utils
-from threads import ObcolWorker, SaveWorker
+from threads import (ObcolWorker,
+                     SaveWorker,
+                     ImportWorker)
 
 os.environ["QT_API"] = "pyqt4"
 
@@ -27,7 +30,9 @@ class ImportList(QtGui.QWidget):
         super(ImportList, self).__init__(parent)
         self.parent = parent
         self.list_widget = list_widget
-        self.list_widget.clicked.connect(self.item_selected)
+        self.list_widget.setSelectionMode(
+            QtGui.QAbstractItemView.ExtendedSelection)
+        self.list_widget.itemSelectionChanged.connect(self.items_selected)
 
     def update(self, import_list):
         if import_list:
@@ -36,8 +41,32 @@ class ImportList(QtGui.QWidget):
             for val in import_list:
                 self.list_widget.addItem(os.path.basename(str(val)))
 
-    def item_selected(self, id):
-        item = self.list_widget.data[id.row()]
+    def items_selected(self):
+        items = []
+        for index in xrange(self.list_widget.count()):
+            items.append(self.list_widget.item(index))
+        labels = [i.text() for i in items]
+
+        selected_labels = [si.text()
+                           for si in self.list_widget.selectedItems()]
+
+        indices = [labels.index(sl) for sl in selected_labels]
+
+        selected = []
+        channels = []
+        for index in indices:
+            selected.append(self.parent.imported_data[index])
+            channels.append(self.parent.analysis_channels[index])
+
+        data_type = self.parent.ui.analysis_data_combobox.currentIndex()
+        self.parent.analysis_view.draw(selected, data_type, channels)
+
+    def add(self, new):
+        self.list_widget.addItem(os.path.basename(str(new)))
+
+    def remove(self, row):
+        item = self.list_widget.takeItem(row)
+        item = None
 
 
 class AnalysisView(QtGui.QWidget):
@@ -61,19 +90,37 @@ class AnalysisView(QtGui.QWidget):
         self.mpl_toolbar.hide()
         self.canvas.hide()
 
-    def draw(self, data, data_type, channel):
+    def draw(self, data_list, data_type, channels):
+        # note that channel can be int or list
         self.canvas.show()
         self.mpl_toolbar.show()
         self.ax.clear()
         self.ax.grid(True)
-        if data_type == 0:
-            x_data = [i for i in range(len(data[channel]))]
-            y_data = []
-            for frame in data[channel]:
-                y_data.append(frame.fraction_with_overlap)
 
-        print(x_data, y_data)
-        self.ax.plot(x_data, y_data)
+        lines = ["-", "--", "-.", ":"]
+        linecycler = cycle(lines)
+        colors = ['r', 'g']
+        for d, data in enumerate(data_list):
+            coloc_channels = channels[d]
+            linestyle = next(linecycler)
+            for c, chan in enumerate(colors):
+                x_data = [i for i in range(len(data[coloc_channels[c]]))]
+                y_data = []
+                for frame in data[coloc_channels[c]]:
+                    if data_type == 0:
+                        y_data.append(frame.overlap_fraction)
+                        self.ax.set_ylabel('Number')
+                    elif data_type == 1:
+                        y_data.append(frame.overlap_size)
+                        self.ax.set_ylabel('Size')
+                    elif data_type == 2:
+                        y_data.append(frame.overlap_signal)
+                        self.ax.set_ylabel('Signal')
+
+                self.ax.set_xlabel('Frame number')
+                self.ax.plot(
+                    x_data, y_data, chan, linestyle=linestyle)
+
         self.fig.tight_layout()
         self.canvas.draw()
 
@@ -304,6 +351,9 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.is_segmentation = False
         self.is_colocalisation = False
         self.thresholds = None
+        self.import_paths = []
+        self.imported_data = []
+        self.analysis_channels = []
 
         # ui conditions
         self.ui.channel_spinbox.setKeyboardTracking(False)
@@ -353,11 +403,21 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.data_combobox.currentIndexChanged.connect(
             self.handle_data_combo)
         self.ui.radio_groupbox.hide()
+        # self.ui.analysis_channel_combobox.currentIndexChanged.connect(
+        #     self.handle_analysis_channel_combo)
+        self.ui.analysis_data_combobox.currentIndexChanged.connect(
+            self.handle_analysis_data_combo)
+        self.ui.add_button.clicked.connect(self.handle_add_button)
+        self.ui.remove_button.clicked.connect(self.handle_remove_button)
 
         # threads
         self.obcol_worker = ObcolWorker(self)
         self.obcol_worker.progress_signal.connect(self.update_progress)
         self.save_worker = SaveWorker(self)
+        self.import_worker = ImportWorker(self)
+        self.import_worker.progress_signal.connect(self.update_progress)
+        self.import_worker.progress_message.connect(self.update_progress_text)
+        self.import_worker.progress_range.connect(self.update_progress_range)
 
     # slots
     def handle_tab_change(self):
@@ -448,8 +508,11 @@ class MainGUIWindow(QtGui.QMainWindow):
     def handle_channel_combo(self, value):
         channel = self.params['channels'][value]
         data_type = self.ui.data_combobox.currentIndex()
-        data = self.segmentation_result[self.curr_frame]
-        self.histogram_view.draw(data, data_type, channel)
+        self.update_histogram(data_type, channel)
+
+    # def handle_analysis_channel_combo(self, value):
+    #     data_type = self.ui.analysis_data_combobox.currentIndex()
+    #     self.update_analysis_plot(data_type, value)
 
     def handle_min_size_spinbox(self, value):
         sender = self.sender().objectName()
@@ -466,18 +529,58 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.max_size_spinbox_2.setValue(value)
 
     def handle_data_combo(self, value):
-        self.update_histogram(value)
+        channel = self.ui.channel_combobox.currentIndex()
+        self.update_histogram(value, channel)
+
+    def handle_analysis_data_combo(self, value):
+        self.update_analysis_plot(value)
+
+    def handle_add_button(self):
+        path = (
+            QtGui.QFileDialog.getOpenFileName(
+                self, "Load Data", self.import_directory, "*.xlsx"))
+        self.import_paths.append(path)
+        if path and len(self.import_paths) < 5:
+            self.list_view.update(self.import_paths)
+            # note to self - you will need a separate thread for this
+
+            # self.imported_data.append(
+            #     utils.read_patches_from_file(str(path)))
+            # self.analysis_channels.append(
+            #     utils.get_channels_from_path(str(path)))
+
+            # data_type = self.ui.analysis_data_combobox.currentIndex()
+            # self.analysis_view.draw(
+            #     self.imported_data, data_type, self.analysis_channels)
+
+            self.import_worker.finished_signal.connect(self.complete_import)
+            self.import_worker.start_thread([path])
+
+    def handle_remove_button(self):
+        item = int(self.ui.import_list_widget.currentRow())
+        self.list_view.remove(item)
+        del self.import_paths[item]
+        del self.imported_data[item]
+        del self.analysis_channels[item]
+
+        data_type = self.ui.analysis_data_combobox.currentIndex()
+        self.analysis_view.draw(
+            self.imported_data, data_type, self.analysis_channels)
 
     def update_display(self):
         self.fmin = float(self.ui.fmin_slider.value())
         self.fmax = float(self.ui.fmax_slider.value())
         self.display_frame()
 
-    def update_histogram(self, data_type):
-        coloc_channel = self.ui.channel_combobox.currentIndex()
+    def update_histogram(self, data_type, coloc_channel):
         channel = self.params['channels'][coloc_channel]
         data = self.segmentation_result[self.curr_frame]
         self.histogram_view.draw(data, data_type, channel)
+
+    def update_analysis_plot(self, data_type):
+        if self.imported_data:
+            self.analysis_view.draw(
+                self.imported_data, data_type, self.analysis_channels)
 
     def load_movie(self):
         self.movie_path = (
@@ -556,17 +659,33 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.movie_path)
 
     def import_patches(self):
-        self.import_paths = (
+        import_paths = (
             QtGui.QFileDialog.getOpenFileNames(
                 self, "Load Data", self.import_directory, "*.xlsx"))
-        if self.import_paths and len(self.import_paths) < 5:
+        self.import_paths.extend(import_paths)
+        if import_paths and len(self.import_paths) < 5:
             self.list_view.update(self.import_paths)
             # note to self - you will need a separate thread for this
-            self.imported_data = []
-            for path in self.import_paths:
-                self.imported_data.append(
-                    utils.read_patches_from_file(str(path)))
-            self.analysis_view.draw(self.imported_data[0], 0, 0)
+
+            # for path in self.import_paths:
+            #     self.imported_data.append(
+            #         utils.read_patches_from_file(str(path)))
+            #     self.analysis_channels.append(
+            #         utils.get_channels_from_path(str(path)))
+
+            self.import_worker.finished_signal.connect(self.complete_import)
+            self.import_worker.start_thread(self.import_paths)
+            # data_type = self.ui.analysis_data_combobox.currentIndex()
+            # self.analysis_view.draw(
+            #     self.imported_data, data_type, self.analysis_channels)
+
+    def complete_import(self, results):
+        self.ui.progress_bar.setValue(0)
+        self.imported_data = results[0]
+        self.analysis_channels = results[1]
+        data_type = self.ui.analysis_data_combobox.currentIndex()
+        self.analysis_view.draw(
+            self.imported_data, data_type, self.analysis_channels)
 
     def prepare_parameters(self, segment=True):
         red_chan = int(self.ui.red_channel_spinbox.value())
@@ -637,8 +756,15 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.overlap_spinbox.setValue(0)
         self.get_frame(0)
 
-    def update_progress(self, frame_num):
-        self.ui.progress_bar.setValue(frame_num)
+    def update_progress(self, value):
+        self.ui.progress_bar.setValue(value)
+
+    def update_progress_range(self, value):
+        self.ui.progress_bar.setMaximum(value)
+
+    def update_progress_text(self, message):
+        # self.ui.progress_bar.setRange(0, 0)
+        self.ui.progress_bar.setFormat(message)
 
     # controllers
     def display_frame(self):

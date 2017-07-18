@@ -203,3 +203,83 @@ class SaveWorker(QThread):
             compress=6,
             metadata={'axes': 'TCYX'})
         writer.save()
+
+
+class ImportWorker(QThread):
+    finished_signal = Signal(tuple)
+    progress_signal = Signal(int)
+    progress_message = Signal(str)
+    progress_range = Signal(int)
+
+    def __init__(self, parent=None):
+        super(ImportWorker, self).__init__(parent)
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+    def isStopped(self):
+        return self.stopped
+
+    def start_thread(self, path_list):
+        """
+        Method called from the GUI
+        """
+        self.path_list = path_list
+        self.start()
+
+    def run(self):
+        imported_data = []
+        analysis_channels = []
+        for p, path in enumerate(self.path_list):
+            imported_data.append(
+                self.read_patches_from_file(str(path)))
+            analysis_channels.append(
+                self.get_channels_from_path(str(path)))
+        self.progress_message.emit("0%")
+        self.finished_signal.emit((imported_data, analysis_channels))
+
+    def generate_patches(self, df):
+        frames = []
+        self.progress_range.emit(df['frame id'].max())
+        for gid, group in df.groupby('frame id'):
+            patches = utils.Patches()
+            for rid, row in group.iterrows():
+                patches.add(utils.Patch(
+                    [int(row['patch id'].item()),
+                     None,
+                     int(row['size'].item()),
+                     (row['centroid x'].item(), row['centroid y'].item()),
+                     int(row['intensity']),
+                     int(row['channel'].item()),
+                     int(row['size overlapped'].item()),
+                     row['fraction overlapped'].item()]))
+            patches.calculate_overlap_fraction()
+            patches.calculate_overlap_size()
+            patches.calculate_overlap_signal()
+            frames.append(patches)
+            self.progress_signal.emit(gid)
+        return frames
+
+    def get_channels_from_path(self, path):
+        cidx = path.find('channels') + 9
+        return [int(i) for i in list(path[cidx: cidx + 2])]
+
+    def read_sheet(self, path, sheetname):
+        return pd.read_excel(path, sheetname=sheetname)
+
+    def read_patches_from_file(self, path):
+        if path.endswith('xlsx'):
+            sheets = ['red', 'green']
+            channels = self.get_channels_from_path(path)
+            patches = {}
+            for c, channel in enumerate(channels):
+                self.progress_message.emit(
+                    "{}: Importing {}".format(
+                        os.path.basename(path), sheets[c]))
+
+                patches[channel] = self.generate_patches(
+                    self.read_sheet(path, sheets[c]))
+            return patches
+        else:
+            raise ValueError("Input data must be in Excel format")
