@@ -128,7 +128,7 @@ class SaveWorker(QThread):
     def stop(self):
         self.stopped = True
 
-    def isStopped(self):
+    def is_stopped(self):
         return self.stopped
 
     def start_thread(self, data, channels, path):
@@ -144,6 +144,8 @@ class SaveWorker(QThread):
         """
         This gets called when self.start() is called
         """
+        if self.is_stopped():
+            return
         self.save()
         self.finished_signal.emit(0)
 
@@ -218,7 +220,7 @@ class ImportWorker(QThread):
     def stop(self):
         self.stopped = True
 
-    def isStopped(self):
+    def is_stopped(self):
         return self.stopped
 
     def start_thread(self, path_list):
@@ -229,6 +231,8 @@ class ImportWorker(QThread):
         self.start()
 
     def run(self):
+        if self.is_stopped():
+            return
         imported_data = []
         analysis_channels = []
         for p, path in enumerate(self.path_list):
