@@ -16,6 +16,7 @@ import utils
 
 class ObcolWorker(QThread):
     progress_signal = Signal(int)
+    progress_message = Signal(str)
     results_signal = Signal(list)
 
     def __init__(self, parent=None):
@@ -38,6 +39,7 @@ class ObcolWorker(QThread):
         Method called from the GUI
         """
         self.movie = movie
+        self.num_frames = len(movie)
         self.parameters = parameters
         self.start()
 
@@ -84,6 +86,10 @@ class ObcolWorker(QThread):
             if (rs.ready()):
                 break
             self.progress_signal.emit(q.qsize())
+            self.progress_message.emit(
+                "Object colocalisation: {}%".format(
+                    int((float(q.qsize()) /
+                        float(self.num_frames)) * 100)))
         rs.wait()
         return results[0]
 
@@ -119,6 +125,7 @@ class ObcolWorker(QThread):
 
 class SaveWorker(QThread):
     progress_signal = Signal(int)
+    progress_message = Signal(str)
     finished_signal = Signal(int)
 
     def __init__(self, parent=None):
@@ -173,6 +180,9 @@ class SaveWorker(QThread):
                     frame.get_mono_labels_in_channel(channel))
 
                 self.progress_signal.emit(counter)
+                self.progress_message.emit(
+                    "Saving object colocalisation results: {}%".format(
+                        int((float(counter) / float(2 * len(frames))) * 100)))
                 for patch in frame.patches[channel]:
                     output.append(
                         [frame_id,
@@ -183,6 +193,7 @@ class SaveWorker(QThread):
                          patch.channel,
                          patch.size,
                          patch.size_overlapped,
+                         patch.signal,
                          float(patch.size_overlapped) / float(patch.size)])
 
                 df = pd.DataFrame(output)
@@ -195,6 +206,7 @@ class SaveWorker(QThread):
                     "channel",
                     "size",
                     "size overlapped",
+                    "signal",
                     "fraction overlapped"]
                 df.to_excel(
                     writer, sheet_name=channel_names[c], index=False)
@@ -257,10 +269,11 @@ class ImportWorker(QThread):
                      int(row['intensity']),
                      int(row['channel'].item()),
                      int(row['size overlapped'].item()),
+                     int(row['signal'].item()),
                      row['fraction overlapped'].item()]))
-            patches.calculate_overlap_fraction()
-            patches.calculate_overlap_size()
-            patches.calculate_overlap_signal()
+            patches.average_overlap_fraction()
+            patches.average_overlap_size()
+            patches.average_overlap_signal()
             frames.append(patches)
             self.progress_signal.emit(gid)
         return frames

@@ -55,7 +55,7 @@ class ImportList(QtGui.QWidget):
         selected = []
         channels = []
         for index in indices:
-            selected.append(self.parent.imported_data[index])
+            selected.append(self.parent.analysis_data[index])
             channels.append(self.parent.analysis_channels[index])
 
         data_type = self.parent.ui.analysis_data_combobox.currentIndex()
@@ -90,7 +90,7 @@ class AnalysisView(QtGui.QWidget):
         self.mpl_toolbar.hide()
         self.canvas.hide()
 
-    def draw(self, data_list, data_type, channels):
+    def draw(self, data_list, data_type, channels_list):
         # note that channel can be int or list
         self.canvas.show()
         self.mpl_toolbar.show()
@@ -101,7 +101,7 @@ class AnalysisView(QtGui.QWidget):
         linecycler = cycle(lines)
         colors = ['r', 'g']
         for d, data in enumerate(data_list):
-            coloc_channels = channels[d]
+            coloc_channels = channels_list[d]
             linestyle = next(linecycler)
             for c, chan in enumerate(colors):
                 x_data = [i for i in range(len(data[coloc_channels[c]]))]
@@ -160,7 +160,7 @@ class HistogramView(QtGui.QWidget):
             self.ax.hist(plot_data, range=(1, max(plot_data)))
         if data_type == 1:  # fraction
             plot_data = data.fraction_of_patch_overlapped(channel)
-            self.ax.set_xlabel('Size of overlap [%]')
+            self.ax.set_xlabel('Fraction of object with overlap')
             self.ax.hist(plot_data, range=(0, max(plot_data)))
         elif data_type == 2:  # signals
             plot_data = data.signals_of_patches(channel)
@@ -341,7 +341,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         # self.table_widget.hide()
 
         # parameters
-        self.directory = ""
+        self.basepath = ""
         self.import_directory = ""
         self.curr_frame = 0
         self.old_f = 1
@@ -352,7 +352,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.is_colocalisation = False
         self.thresholds = None
         self.import_paths = []
-        self.imported_data = []
+        self.analysis_data = []
         self.analysis_channels = []
 
         # ui conditions
@@ -413,7 +413,10 @@ class MainGUIWindow(QtGui.QMainWindow):
         # threads
         self.obcol_worker = ObcolWorker(self)
         self.obcol_worker.progress_signal.connect(self.update_progress)
+        self.obcol_worker.progress_message.connect(self.update_progress_text)
         self.save_worker = SaveWorker(self)
+        self.save_worker.progress_signal.connect(self.update_progress)
+        self.save_worker.progress_message.connect(self.update_progress_text)
         self.import_worker = ImportWorker(self)
         self.import_worker.progress_signal.connect(self.update_progress)
         self.import_worker.progress_message.connect(self.update_progress_text)
@@ -445,7 +448,8 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.get_frame(-1)
             self.old_coloc_f = curr_f
             data_type = self.ui.data_combobox.currentIndex()
-            self.update_histogram(data_type)
+            coloc_channel = self.ui.channel_combobox.currentIndex()
+            self.update_histogram(data_type, coloc_channel)
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
@@ -506,9 +510,8 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.display_frame()
 
     def handle_channel_combo(self, value):
-        channel = self.params['channels'][value]
         data_type = self.ui.data_combobox.currentIndex()
-        self.update_histogram(data_type, channel)
+        self.update_histogram(data_type, value)
 
     # def handle_analysis_channel_combo(self, value):
     #     data_type = self.ui.analysis_data_combobox.currentIndex()
@@ -542,16 +545,6 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.import_paths.append(path)
         if path and len(self.import_paths) < 5:
             self.list_view.update(self.import_paths)
-            # note to self - you will need a separate thread for this
-
-            # self.imported_data.append(
-            #     utils.read_patches_from_file(str(path)))
-            # self.analysis_channels.append(
-            #     utils.get_channels_from_path(str(path)))
-
-            # data_type = self.ui.analysis_data_combobox.currentIndex()
-            # self.analysis_view.draw(
-            #     self.imported_data, data_type, self.analysis_channels)
 
             self.import_worker.finished_signal.connect(self.complete_import)
             self.import_worker.start_thread([path])
@@ -560,12 +553,12 @@ class MainGUIWindow(QtGui.QMainWindow):
         item = int(self.ui.import_list_widget.currentRow())
         self.list_view.remove(item)
         del self.import_paths[item]
-        del self.imported_data[item]
+        del self.analysis_data[item]
         del self.analysis_channels[item]
 
         data_type = self.ui.analysis_data_combobox.currentIndex()
         self.analysis_view.draw(
-            self.imported_data, data_type, self.analysis_channels)
+            self.analysis_data, data_type, self.analysis_channels)
 
     def update_display(self):
         self.fmin = float(self.ui.fmin_slider.value())
@@ -573,21 +566,24 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.display_frame()
 
     def update_histogram(self, data_type, coloc_channel):
+        print("coloc_channel", coloc_channel)
+        print(self.params['channels'])
         channel = self.params['channels'][coloc_channel]
         data = self.segmentation_result[self.curr_frame]
         self.histogram_view.draw(data, data_type, channel)
 
     def update_analysis_plot(self, data_type):
-        if self.imported_data:
+        if self.analysis_data:
             self.analysis_view.draw(
-                self.imported_data, data_type, self.analysis_channels)
+                self.analysis_data, data_type, self.analysis_channels)
 
     def load_movie(self):
         self.movie_path = (
             str(QtGui.QFileDialog.getOpenFileName(self,
-                "Load Movie", self.directory, "*.tif")))
+                "Load Movie", self.basepath, "*.tif")))
         if self.movie_path:
-            self.directory = os.path.dirname(self.movie_path)
+            self.basepath = os.path.dirname(self.movie_path)
+            self.basename = os.path.splitext(self.movie_path)[0]
             movie_array = imread(self.movie_path)
             self.movie = utils.generate_frames(movie_array)
             if movie_array.ndim == 4:
@@ -651,12 +647,17 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def save(self):
         if self.is_segmentation:
-            self.save_worker.progress_signal.connect(self.update_progress)
-            self.save_worker.finished_signal.connect(self.update_progress)
+            self.ui.progress_bar.setMaximum(2 * self.num_frames)
+            self.save_worker.finished_signal.connect(self.complete_save)
             self.save_worker.start_thread(
                 self.segmentation_result,
                 self.params['channels'],
                 self.movie_path)
+
+    def complete_save(self):
+        self.ui.progress_bar.setMaximum(self.num_frames)
+        self.update_progress(0)
+        self.update_progress_text("0%")
 
     def import_patches(self):
         import_paths = (
@@ -665,27 +666,17 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.import_paths.extend(import_paths)
         if import_paths and len(self.import_paths) < 5:
             self.list_view.update(self.import_paths)
-            # note to self - you will need a separate thread for this
-
-            # for path in self.import_paths:
-            #     self.imported_data.append(
-            #         utils.read_patches_from_file(str(path)))
-            #     self.analysis_channels.append(
-            #         utils.get_channels_from_path(str(path)))
 
             self.import_worker.finished_signal.connect(self.complete_import)
             self.import_worker.start_thread(self.import_paths)
-            # data_type = self.ui.analysis_data_combobox.currentIndex()
-            # self.analysis_view.draw(
-            #     self.imported_data, data_type, self.analysis_channels)
 
     def complete_import(self, results):
-        self.ui.progress_bar.setValue(0)
-        self.imported_data = results[0]
-        self.analysis_channels = results[1]
+        self.update_progress(0)
+        self.analysis_data.append(results[0])
+        self.analysis_channels.append(results[1])
         data_type = self.ui.analysis_data_combobox.currentIndex()
         self.analysis_view.draw(
-            self.imported_data, data_type, self.analysis_channels)
+            self.analysis_data, data_type, self.analysis_channels)
 
     def prepare_parameters(self, segment=True):
         red_chan = int(self.ui.red_channel_spinbox.value())
@@ -721,14 +712,43 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def obcol_plotter(self, result):
         self.segmentation_result = result
+        # update GUI parameters
         self.is_segmentation = True
         self.is_movie = False
+        # save the result
+        self.update_progress(0)
+        self.update_progress_text("0%")
+        self.save()
+        # update the GUI itself
         self.ui.radio_groupbox.show()
         self.ui.result_radio.setChecked(True)
         self.ui.movie_radio.setChecked(False)
-        self.ui.progress_bar.setValue(0)
+        # plot the histogram for each frame
         channel = self.params['channels'][0]
         self.histogram_view.draw(result[0], 0, channel)
+
+        # now to plot overall stats effectively do an import
+        # update the paths
+        channel_str = "_channels_"
+        for channel in self.params['channels']:
+            channel_str += str(channel)
+
+        self.import_paths.append(
+            os.path.join(self.basename + channel_str + '_obcol.xlsx'))
+
+        # and channels that will be analysed
+        self.analysis_channels.append(self.params['channels'])
+
+        # finally update the list widget
+        self.list_view.update(self.import_paths)
+
+        # prepare the data for the stats plot
+        self.analysis_data.append(utils.convert_frames_to_patches(
+            result, self.params['channels']))
+
+        # and update the overall stats plot
+        self.analysis_view.draw(self.analysis_data, 0, self.analysis_channels)
+
         # self.table_widget.set_data(result, params['channels'])
         # self.table_widget.show()
         self.get_frame(0)

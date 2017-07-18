@@ -235,17 +235,18 @@ class Frame(object):
                 patch = self.__identify_patch(flabel, channel)
 
                 # calculate the colocalisation parameters for that patch
-                patch.fraction_overlapped = overlap_size / patch.size
-                patch.size_overlapped = patch.size * patch.fraction_overlapped
+                patch.fraction_overlapped = overlap_size / object_size
+                patch.size_overlapped = object_size * patch.fraction_overlapped
                 patch.signal = patch.intensity * patch.fraction_overlapped
-                print(patch.signal)
                 # keep the indices of the overlapped region for filtering
                 # objects in the GUI
                 if (np.any(pix) > 0 and overlap > 0.0):
                     if (overlap_size > object_size * overlap):
                         overlapping.append(flabel)
 
-        self.patches[channel].calculate_overlap_fraction()
+        self.patches[channel].average_overlap_fraction()
+        self.patches[channel].average_overlap_size()
+        self.patches[channel].average_overlap_signal()
         return overlapping
 
     def __keep_overlapped_labels(self, channel_labels, label_ids):
@@ -274,7 +275,7 @@ class Frame(object):
 
     def fraction_of_patch_overlapped(self, channel):
         """For a given channel return the amount of overlap for each
-        Patch in the channels of interest"""
+        Patch"""
         return self.patches[channel].get_overlap_fraction()
 
     def get_fraction_overlapped(self, channel):
@@ -298,7 +299,7 @@ class Patch(object):
         self.channel = parameters[5]
         self.size_overlapped = 0.0
         self.fraction_overlapped = 0.0
-        if len(parameters) > 5:
+        if len(parameters) > 6:
             self.size_overlapped = parameters[6]
             self.fraction_overlapped = parameters[7]
         self.signal = 0.0
@@ -344,7 +345,7 @@ class Patches(object):
         self.total_size += float(patch.size)
         self.total_signal += float(patch.intensity * patch.size)
 
-    def calculate_overlap_fraction(self):
+    def average_overlap_fraction(self):
         has_overlap = []
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
@@ -353,7 +354,7 @@ class Patches(object):
         self.overlap_fraction = (
             float(len(has_overlap)) / float(len(self.patches)))
 
-    def calculate_overlap_size(self):
+    def average_overlap_size(self):
         sizes = 0.0
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
@@ -361,7 +362,7 @@ class Patches(object):
 
         self.overlap_size = sizes / self.total_size
 
-    def calculate_overlap_signal(self):
+    def average_overlap_signal(self):
         signal = 0.0
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
@@ -422,7 +423,7 @@ def generate_frames(movie_array):
 
 
 def object_colocalisation(movie, params):
-    """Colocalise frames in a movie instance using parameters
+    """Colocalise frames in a movie using parameters
     defined in the parameter list
     """
     channels, thresholds, overlap, size_range = params
@@ -477,6 +478,16 @@ def parallel_process(parameters):
         return frame
     else:
         return None
+
+
+def convert_frames_to_patches(frames, coloc_channels):
+    patch_dict = {}
+    for chan in coloc_channels:
+        patch_list = []
+        for frame in frames:
+            patch_list.append(frame.patches[chan])
+        patch_dict[chan] = patch_list
+    return patch_dict
 
 
 def save_patches(movie_path, frames, channels):
@@ -537,9 +548,11 @@ def run(movie, parameters, segment=True):
     while (True):
         if (rs.ready()):
             break
-        # print(q.qsize())
+        print("Object colocalisation: {}%".format(
+            int((float(q.qsize()) / float(len(movie))) * 100)))
     toc3 = time.time()
     print(toc3 - tic3)
+    print(len(movie))
     return results[0]
 
 #
@@ -560,10 +573,11 @@ def generate_patches(df):
                  int(row['intensity']),
                  int(row['channel'].item()),
                  int(row['size overlapped'].item()),
+                 int(row['signal'].item()),
                  row['fraction overlapped'].item()]))
-        patches.calculate_overlap_fraction()
-        patches.calculate_overlap_size()
-        patches.calculate_overlap_signal()
+        patches.average_overlap_fraction()
+        patches.average_overlap_size()
+        patches.average_overlap_signal()
         frames.append(patches)
     return frames
 
@@ -591,16 +605,16 @@ def read_patches_from_file(path):
 
 if __name__ == '__main__':
 
-    path = "WT.tif"
-    movie_array = imread(path)[0:2, :, :, :]
+    path = "KS 0-30min.tif"
+    movie_array = imread(path)
     movie = generate_frames(movie_array)
     channels = [2, 0]
-    thresholds = [250, 1600]
+    thresholds = [1676, 2776]
     overlap = 0.0
     size_range = (1, 100000)
     params = [channels, thresholds, overlap, size_range]
 
-    # results = run(movie, params)
+    results = run(movie, params)
     # overlap = 0.2
     # params = [channels, thresholds, overlap, size_range]
     # filtered = run(results, params, segment=False)
@@ -614,6 +628,6 @@ if __name__ == '__main__':
     # plt.show()
 
     # results = object_colocalisation(movie, params)
-    patches = read_patches_from_file("WT_channels_20_obcol.xlsx")
-    red = patches[0]
-    print(red[0][0])
+    # patches = read_patches_from_file("WT_channels_20_obcol.xlsx")
+    # red = patches[0]
+    # print(red[0][0])
