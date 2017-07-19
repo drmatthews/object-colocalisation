@@ -40,7 +40,13 @@ class ObcolWorker(QThread):
         """
         self.movie = movie
         self.num_frames = len(movie)
-        self.parameters = parameters
+        self.movie_path = parameters['movie_path']
+        self.channels = parameters['channels']
+        self.thresholds = parameters['thresholds']
+        self.overlap = parameters['overlap']
+        self.size_range = parameters['size_range']
+        self.segment = parameters['segment']
+        self.save_parameters()
         self.start()
 
     def run(self):
@@ -61,13 +67,6 @@ class ObcolWorker(QThread):
         Distribute the work of colocalisation across multiple CPUs.
         Note this uses the utils.parallel_obcol helper function
         """
-        self.channels = self.parameters['channels']
-        self.thresholds = self.parameters['thresholds']
-        self.overlap = self.parameters['overlap']
-        print("overlap", self.overlap)
-        self.size_range = self.parameters['size_range']
-        self.segment = self.parameters['segment']
-        print("segment", self.segment)
         q = self.queue
         parameter_list = [(q, utils.Parameters(
             frame,
@@ -112,11 +111,23 @@ class ObcolWorker(QThread):
 
         return results
 
-    def save(self, results):
-        movie_path = self.parameters['movie_path']
-        channels = self.channels
-        utils.save_patches(
-            os.path.basename(movie_path), results, channels)
+    def save_parameters(self):
+        basepath = os.path.dirname(self.movie_path)
+        basename = os.path.splitext(self.movie_path)[0]
+
+        channel_str = "_channels_"
+        for channel in self.channels:
+            channel_str += str(channel)
+
+        path = os.path.join(
+            basepath, basename + channel_str + '_obcol_parameters.txt')
+        with open(path, "w") as file:
+            file.write("channels:" +
+                       ",".join([str(c) for c in self.channels]) + "\n")
+            file.write("thresholds:" +
+                       ",".join([str(c) for c in self.thresholds]) + "\n")
+            file.write("size range:" +
+                       ",".join([str(c) for c in self.size_range]) + "\n")
 
     def clear_queue(self):
         while not self.queue.empty():
@@ -183,18 +194,21 @@ class SaveWorker(QThread):
                 self.progress_message.emit(
                     "Saving object colocalisation results: {}%".format(
                         int((float(counter) / float(2 * len(frames))) * 100)))
-                for patch in frame.patches[channel]:
-                    output.append(
-                        [frame_id,
-                         patch.id,
-                         patch.centroid[0],
-                         patch.centroid[1],
-                         patch.intensity,
-                         patch.channel,
-                         patch.size,
-                         patch.size_overlapped,
-                         patch.signal,
-                         float(patch.size_overlapped) / float(patch.size)])
+                if len(frame.patches[channel]) > 0:
+                    for patch in frame.patches[channel]:
+                        output.append(
+                            [frame_id,
+                             patch.id,
+                             patch.centroid[0],
+                             patch.centroid[1],
+                             patch.intensity,
+                             patch.channel,
+                             patch.size,
+                             patch.size_overlapped,
+                             patch.signal,
+                             float(patch.size_overlapped) / float(patch.size)])
+                else:
+                    output.append([frame_id] + [0.0 for i in range(9)])
 
                 df = pd.DataFrame(output)
                 df.columns = [

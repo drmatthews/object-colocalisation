@@ -32,6 +32,10 @@ class ImportList(QtGui.QWidget):
         self.list_widget = list_widget
         self.list_widget.setSelectionMode(
             QtGui.QAbstractItemView.ExtendedSelection)
+        self.list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.connect(self.list_widget, QtCore.SIGNAL(
+            "customContextMenuRequested(QPoint)"),
+            self.item_right_clicked)
         self.list_widget.itemSelectionChanged.connect(self.items_selected)
 
     def update(self, import_list):
@@ -68,6 +72,26 @@ class ImportList(QtGui.QWidget):
         item = self.list_widget.takeItem(row)
         item = None
 
+    def set_selected(self, row):
+        self.list_widget.setCurrentRow(row)
+        item = self.list_widget.item(row)
+        item.setSelected(True)
+
+    def item_right_clicked(self, qpos):
+        self.list_menu = QtGui.QMenu()
+        menu_item = self.list_menu.addAction("Copy")
+        self.connect(menu_item,
+                     QtCore.SIGNAL("triggered()"), self.menu_item_clicked)
+        parent_position = self.list_widget.mapToGlobal(QtCore.QPoint(0, 0))
+        self.list_menu.move(parent_position + qpos)
+        self.list_menu.show()
+
+    def menu_item_clicked(self):
+        name = str(self.list_widget.currentItem().text())
+        cb = QtGui.QApplication.clipboard()
+        cb.clear(mode=cb.Clipboard)
+        cb.setText(name, mode=cb.Clipboard)
+
 
 class AnalysisView(QtGui.QWidget):
     def __init__(self, parent):
@@ -96,7 +120,6 @@ class AnalysisView(QtGui.QWidget):
         self.mpl_toolbar.show()
         self.ax.clear()
         self.ax.grid(True)
-
         lines = ["-", "--", "-.", ":"]
         linecycler = cycle(lines)
         colors = ['r', 'g']
@@ -155,17 +178,24 @@ class HistogramView(QtGui.QWidget):
         self.ax.grid(True)
         self.ax.set_ylabel('Count')
         if data_type == 0:  # sizes
-            plot_data = data.sizes_of_patches(channel)
             self.ax.set_xlabel('Size of overlap [pixels]')
-            self.ax.hist(plot_data, range=(1, max(plot_data)))
+            plot_data = data.sizes_of_patches(channel)
+            if all(v == 0.0 for v in plot_data):
+                range_min = 0
+            else:
+                range_min = 1
         if data_type == 1:  # fraction
             plot_data = data.fraction_of_patch_overlapped(channel)
             self.ax.set_xlabel('Fraction of object with overlap')
-            self.ax.hist(plot_data, range=(0, max(plot_data)))
+            range_min = 0
         elif data_type == 2:  # signals
             plot_data = data.signals_of_patches(channel)
             self.ax.set_xlabel('Total grey levels in overlap region')
-            self.ax.hist(plot_data, range=(1, max(plot_data)))
+            if all(v == 0.0 for v in plot_data):
+                range_min = 0
+            else:
+                range_min = 1
+        self.ax.hist(plot_data, range=(range_min, max(plot_data)))
         self.fig.tight_layout()
         self.canvas.draw()
 
@@ -412,12 +442,14 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         # threads
         self.obcol_worker = ObcolWorker(self)
+        self.obcol_worker.results_signal.connect(self.obcol_plotter)
         self.obcol_worker.progress_signal.connect(self.update_progress)
         self.obcol_worker.progress_message.connect(self.update_progress_text)
         self.save_worker = SaveWorker(self)
         self.save_worker.progress_signal.connect(self.update_progress)
         self.save_worker.progress_message.connect(self.update_progress_text)
         self.import_worker = ImportWorker(self)
+        self.import_worker.finished_signal.connect(self.complete_import)
         self.import_worker.progress_signal.connect(self.update_progress)
         self.import_worker.progress_message.connect(self.update_progress_text)
         self.import_worker.progress_range.connect(self.update_progress_range)
@@ -487,6 +519,8 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def handle_threshold_spinbox(self, value):
         self.ui.threshold_slider.setValue(value)
+        self.thresholds[self.curr_channel] = float(
+            self.ui.threshold_slider.value())
         self.update_display()
 
     def handle_radio_state(self):
@@ -544,9 +578,6 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self, "Load Data", self.import_directory, "*.xlsx"))
         self.import_paths.append(path)
         if path and len(self.import_paths) < 5:
-            self.list_view.update(self.import_paths)
-
-            self.import_worker.finished_signal.connect(self.complete_import)
             self.import_worker.start_thread([path])
 
     def handle_remove_button(self):
@@ -566,8 +597,6 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.display_frame()
 
     def update_histogram(self, data_type, coloc_channel):
-        print("coloc_channel", coloc_channel)
-        print(self.params['channels'])
         channel = self.params['channels'][coloc_channel]
         data = self.segmentation_result[self.curr_frame]
         self.histogram_view.draw(data, data_type, channel)
@@ -665,15 +694,24 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self, "Load Data", self.import_directory, "*.xlsx"))
         self.import_paths.extend(import_paths)
         if import_paths and len(self.import_paths) < 5:
-            self.list_view.update(self.import_paths)
-
-            self.import_worker.finished_signal.connect(self.complete_import)
             self.import_worker.start_thread(self.import_paths)
 
     def complete_import(self, results):
+        print("import complete")
         self.update_progress(0)
-        self.analysis_data.append(results[0])
-        self.analysis_channels.append(results[1])
+
+        if (len(self.analysis_data) > 0 and
+                len(self.analysis_channels) > 0):
+
+            self.analysis_data.extend(results[0])
+            self.analysis_channels.extend(results[1])
+        else:
+            self.analysis_data = results[0]
+            self.analysis_channels = results[1]
+
+        self.list_view.update(self.import_paths)
+        self.list_view.set_selected(0)
+        print("analysis_channels", self.analysis_channels)
         data_type = self.ui.analysis_data_combobox.currentIndex()
         self.analysis_view.draw(
             self.analysis_data, data_type, self.analysis_channels)
@@ -706,8 +744,6 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.segmentation_result = []
         self.colocalisation_result = []
         params = self.prepare_parameters()
-        self.obcol_worker.results_signal.connect(
-            self.obcol_plotter)
         self.obcol_worker.start_thread(self.movie, params)
 
     def obcol_plotter(self, result):
@@ -733,21 +769,22 @@ class MainGUIWindow(QtGui.QMainWindow):
         for channel in self.params['channels']:
             channel_str += str(channel)
 
-        self.import_paths.append(
-            os.path.join(self.basename + channel_str + '_obcol.xlsx'))
+        xlpath = os.path.join(self.basename + channel_str + '_obcol.xlsx')
+        if xlpath not in self.import_paths:
+            self.import_paths.append(xlpath)
 
         # and channels that will be analysed
         self.analysis_channels.append(self.params['channels'])
-
-        # finally update the list widget
-        self.list_view.update(self.import_paths)
-
+        print("analyis_channels", self.analysis_channels)
         # prepare the data for the stats plot
         self.analysis_data.append(utils.convert_frames_to_patches(
             result, self.params['channels']))
 
         # and update the overall stats plot
         self.analysis_view.draw(self.analysis_data, 0, self.analysis_channels)
+
+        # finally update the list widget
+        self.list_view.update(self.import_paths)
 
         # self.table_widget.set_data(result, params['channels'])
         # self.table_widget.show()
@@ -760,8 +797,6 @@ class MainGUIWindow(QtGui.QMainWindow):
         if params['overlap'] == 0.0:
             self.handle_colocalisation_reset()
         else:
-            self.obcol_worker.results_signal.connect(
-                self.filter_plotter)
             self.obcol_worker.start_thread(self.segmentation_result, params)
 
     def filter_plotter(self, result):

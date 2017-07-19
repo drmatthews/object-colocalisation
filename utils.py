@@ -91,6 +91,7 @@ class Frame(object):
                             objects retained by the segmentation
         """
         self.channels_to_overlap = channels
+        print(zip(channels, thresholds))
         self.thresholds_for_segmentation = thresholds
         self.size_range = size_range
         if len(channels) == 2 and len(thresholds) == 2:
@@ -351,24 +352,31 @@ class Patches(object):
             if patch.fraction_overlapped > 0.0:
                 has_overlap.append(patch)
 
-        self.overlap_fraction = (
-            float(len(has_overlap)) / float(len(self.patches)))
+        try:
+            self.overlap_fraction = (
+                float(len(has_overlap)) / float(len(self.patches)))
+        except ZeroDivisionError:
+            self.overlap_fraction = 0.0
 
     def average_overlap_size(self):
         sizes = 0.0
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
                 sizes += float(patch.size) * patch.fraction_overlapped
-
-        self.overlap_size = sizes / self.total_size
+        try:
+            self.overlap_size = sizes / self.total_size
+        except ZeroDivisionError:
+            self.overlap_size = 0.0
 
     def average_overlap_signal(self):
         signal = 0.0
         for patch in self.patches:
             if patch.fraction_overlapped > 0.0:
                 signal += float(patch.intensity) * patch.fraction_overlapped
-
-        self.overlap_signal = signal / self.total_signal
+        try:
+            self.overlap_signal = signal / self.total_signal
+        except ZeroDivisionError:
+            self.overlap_signal = 0.0
 
     def labelled_image(self, shape, dtype):
         img = np.zeros(shape, dtype=dtype)
@@ -605,16 +613,17 @@ def read_patches_from_file(path):
 
 if __name__ == '__main__':
 
-    path = "KS 0-30min.tif"
+    path = "/home/daniel/Documents/Image Processing/Mag/for Dan analysis/data/WT 0-30min 2.tif"
     movie_array = imread(path)
     movie = generate_frames(movie_array)
     channels = [2, 0]
-    thresholds = [1676, 2776]
+    thresholds = [2061, 2735]
     overlap = 0.0
     size_range = (1, 100000)
     params = [channels, thresholds, overlap, size_range]
 
     results = run(movie, params)
+    # results = object_colocalisation(movie, params)
     # overlap = 0.2
     # params = [channels, thresholds, overlap, size_range]
     # filtered = run(results, params, segment=False)
