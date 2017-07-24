@@ -169,8 +169,12 @@ class SaveWorker(QThread):
 
     def save(self):
         frames = self.data
+
         movie_array = np.zeros(
             (len(frames), 2, frames[0].height, frames[0].width))
+
+        labels = []
+
         movie_path = self.path
         channels = self.channels
         basepath = os.path.dirname(movie_path)
@@ -185,10 +189,14 @@ class SaveWorker(QThread):
         channel_names = ["red", "green"]
         counter = 0
         for c, channel in enumerate(channels):
+            labels = []
             output = []
             for frame_id, frame in enumerate(frames):
+
                 movie_array[frame_id, c, :, :] = (
                     frame.get_mono_labels_in_channel(channel))
+
+                labels.append(frame.labels[channel, :, :])
 
                 self.progress_signal.emit(counter)
                 self.progress_message.emit(
@@ -225,11 +233,23 @@ class SaveWorker(QThread):
                 df.to_excel(
                     writer, sheet_name=channel_names[c], index=False)
                 counter += 1
+
+            label_array = np.rollaxis(np.dstack(labels), -1)
+            label_filename = (
+                basename + channel_str +
+                '_{}labels.tif'.format(channel_names[c]))
+            imsave(
+                os.path.join(basepath, label_filename),
+                label_array.astype(np.uint8),
+                compress=6,
+                metadata={'axes': 'TYX'})
+
         imsave(
             os.path.join(basepath, basename + channel_str + '_segmented.tif'),
             movie_array.astype(np.uint8),
             compress=6,
             metadata={'axes': 'TCYX'})
+
         writer.save()
 
 
