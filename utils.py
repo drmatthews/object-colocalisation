@@ -6,9 +6,11 @@ from scipy import ndimage as ndi
 from skimage.feature import peak_local_max as plm
 from skimage.morphology import watershed, label
 from skimage.measure import regionprops
+from skimage.filters import gaussian
 import numpy as np
 import pandas as pd
 from tifffile import imread
+import trackpy as tp
 from matplotlib import pyplot as plt
 from wavelet_denoise import wavelet_filter as wf
 
@@ -39,6 +41,7 @@ class Frame(object):
         self.green_overlaps = []
         self.patches = {}
         self.size_range = ()
+        self.sigma = 1
         Frame.frame_num += 1
 
     def get_image(self):
@@ -81,7 +84,7 @@ class Frame(object):
                 self.get_mono_labels_in_channel(channels[channel], filtered))
         return labels
 
-    def segment(self, channels, thresholds, size_range):
+    def segment(self, channels, thresholds, size_range, sigma):
         """Segments objects in the numpy representation of the Frame object.
 
         Input: channels -   a list of channel indices in the numpy
@@ -91,30 +94,34 @@ class Frame(object):
                             objects retained by the segmentation
         """
         self.channels_to_overlap = channels
-        print(zip(channels, thresholds))
         self.thresholds_for_segmentation = thresholds
         self.size_range = size_range
+        self.sigma = sigma
         if len(channels) == 2 and len(thresholds) == 2:
 
             for channel, threshold in zip(channels, thresholds):
-                self.locate(channel, threshold, size_range)
+                self.locate(channel, threshold, size_range, sigma)
 
             # self.calculate_overlap(channels, overlap)
         else:
             return None
 
-    def locate(self, channel, threshold, size_range):
+    def locate(self, channel, threshold, size_range, sigma):
         """Wavelet noise filtering followed by watershedding.
         Input: channel    - a index in the numpy array representation
                threshold  - the grey level threshold for that channel
                size_range - a tuple of min and max size in pixels for objects
                             to be retained by the segmentation
         """
-        (filtered, thresh) = self.__wavelet_filter(
-            self.img[channel, :, :], threshold=threshold)
-        self.labels[channel, :, :] = self.__sk_watershed(filtered)
+        gauss_filtered = self._gaussian_filter(
+            self.img[channel, :, :], sigma=sigma)
 
-        self.__label_properties(self.labels, self.img, channel, size_range)
+        (wave_filtered, thresh) = self._wavelet_filter(
+            gauss_filtered, threshold=threshold)
+
+        self.labels[channel, :, :] = self._sk_watershed(wave_filtered)
+
+        self._label_properties(self.labels, self.img, channel, size_range)
 
     def object_colocalisation(self, channels, overlap):
         """Determines how much overlap there is in segmented objects represented
@@ -126,24 +133,24 @@ class Frame(object):
         """
         rlabels = self.labels[channels[0], :, :]
         glabels = self.labels[channels[1], :, :]
-        self.red_overlaps = self.__find_indices_of_overlaps(
+        self.red_overlaps = self._find_indices_of_overlaps(
             rlabels, glabels, channels[0], overlap)
-        self.green_overlaps = self.__find_indices_of_overlaps(
+        self.green_overlaps = self._find_indices_of_overlaps(
             glabels, rlabels, channels[1], overlap)
 
         self.filtered_labels = self.labels.copy()
-        self.__keep_overlapped_labels(
+        self._keep_overlapped_labels(
             self.filtered_labels[channels[0], :, :], self.red_overlaps)
-        self.__keep_overlapped_labels(
+        self._keep_overlapped_labels(
             self.filtered_labels[channels[1], :, :], self.green_overlaps)
 
-    def __sk_watershed(self, image, radius=1.0):
+    def _sk_watershed(self, image, radius=1.0):
         """Does the watershed segmentation of an image using scikit-image.
         Input: image  - a numpy representation of the data being segmented
                radius - the radius in pixels to use when creating a binary
                         mask
         """
-        footprint = self.__binary_mask(radius)
+        footprint = self._binary_mask(radius)
         distance = ndi.distance_transform_edt(image)
         coords = plm(
             distance,
@@ -154,7 +161,7 @@ class Frame(object):
         markers = label(coords)
         return label(watershed(-distance, markers, mask=image), connectivity=2)
 
-    def __label_properties(self, labels, image, channel, size_range):
+    def _label_properties(self, labels, image, channel, size_range):
         """Uses scikit-image regionprops to make measurements of segmented objects
         and creates a collection of Patch objects.
         Input: labels     - the numpy labelled array returned by watershedding
@@ -180,13 +187,13 @@ class Frame(object):
 
         self.patches[channel] = patches
 
-    def __threshold_image(self, image, thresh):
+    def _threshold_image(self, image, thresh):
         """Returns a boolean ndarray with True where the pixel
         grey level in the input image is above the threshold value
         """
         return image > thresh
 
-    def __binary_mask(self, radius, ndim=2, separation=None):
+    def _binary_mask(self, radius, ndim=2, separation=None):
         """circular mask in a square array for use in scipy peak_local_max
         """
         points = np.arange(-radius, radius + 1)
@@ -197,7 +204,10 @@ class Frame(object):
         r = np.sqrt(np.sum(coords ** 2, 0))
         return r <= radius
 
-    def __wavelet_filter(self, image, threshold=None):
+    def _gaussian_filter(self, image, sigma=1):
+        return gaussian(image.astype(float), sigma=sigma)
+
+    def _wavelet_filter(self, image, threshold=None):
         """Wavelet denoising of the input image
         """
         cwf = wf.CompoundWaveletFilter(3, 2.0)
@@ -206,12 +216,12 @@ class Frame(object):
         if threshold is None:
             threshold = np.std(cwf.result_f1)
 
-        mask = self.__threshold_image(image, threshold)
+        mask = self._threshold_image(image, threshold)
         masked = filtered * mask
 
         return (masked, threshold)
 
-    def __find_indices_of_overlaps(
+    def _find_indices_of_overlaps(
             self, first_labels, second_labels, channel, overlap):
         """Does the actual work of finding the overlaps between
         segmented objects in the two chosen channels.
@@ -233,7 +243,7 @@ class Frame(object):
                 overlap_size = float(len(np.where(pix > 0)[0]))
 
                 # identify the Patch object that belongs to this region
-                patch = self.__identify_patch(flabel, channel)
+                patch = self._identify_patch(flabel, channel)
 
                 # calculate the colocalisation parameters for that patch
                 patch.fraction_overlapped = overlap_size / object_size
@@ -250,7 +260,7 @@ class Frame(object):
         self.patches[channel].average_overlap_signal()
         return overlapping
 
-    def __keep_overlapped_labels(self, channel_labels, label_ids):
+    def _keep_overlapped_labels(self, channel_labels, label_ids):
         """Determine which labels to keep for display
         """
         uids = list(np.unique(channel_labels))
@@ -259,7 +269,7 @@ class Frame(object):
             lidx = np.where(channel_labels == label_id)
             channel_labels[lidx] = 0
 
-    def __identify_patch(self, label_id, channel):
+    def _identify_patch(self, label_id, channel):
         """Return a Patch object for the specified label_id
         in the specified channel"""
         pout = [patch for patch in self.patches[channel]
@@ -434,10 +444,10 @@ def object_colocalisation(movie, params):
     """Colocalise frames in a movie using parameters
     defined in the parameter list
     """
-    channels, thresholds, overlap, size_range = params
+    channels, thresholds, overlap, size_range, sigma = params
     results = []
     for i, frame in enumerate(movie):
-        frame.segment(channels, thresholds, size_range)
+        frame.segment(channels, thresholds, size_range, sigma)
         frame.object_colocalisation(channels, overlap)
         results.append(frame)
     return results
@@ -453,7 +463,8 @@ class Parameters(object):
                  thresholds,
                  overlap,
                  size_range,
-                 segment):
+                 segment,
+                 sigma):
 
         self.frame = frame
         self.channels = channels
@@ -461,6 +472,7 @@ class Parameters(object):
         self.overlap = overlap
         self.size_range = size_range
         self.segment = segment
+        self.sigma = sigma
 
 
 def parallel_process(parameters):
@@ -477,11 +489,12 @@ def parallel_process(parameters):
     thresholds = params.thresholds
     overlap = params.overlap
     size_range = params.size_range
+    sigma = params.sigma
     frame = params.frame
     queue.put(frame.frame_id)
     if len(channels) == 2 and len(thresholds) == 2:
         if params.segment:
-            frame.segment(channels, thresholds, size_range)
+            frame.segment(channels, thresholds, size_range, sigma)
         frame.object_colocalisation(channels, overlap)
         return frame
     else:
@@ -498,6 +511,41 @@ def convert_frames_to_patches(frames, coloc_channels):
     return patch_dict
 
 
+#
+# helpers for tracking
+#
+def convert_to_features(frames, channel):
+    output = []
+    for frame_id, frame in enumerate(frames):
+        for patch in frame.patches[channel]:
+            output.append(
+                [patch.centroid[0],
+                 patch.centroid[1],
+                 frame_id,
+                 patch.id])
+
+    df = pd.DataFrame(output)
+    df.columns = [
+        "x",
+        "y",
+        "frame",
+        "patch id"]
+    return df
+
+
+def track(frames, channels):
+    tracks = []
+    for channel in channels:
+        features = convert_to_features(frames, channel)
+        t = tp.link_df(
+            features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
+        tracks.append(tp.filter_stubs(t, 10))
+    return tracks
+
+
+#
+# for saving to excel using pandas
+#
 def save_patches(movie_path, frames, channels):
     basepath = os.path.dirname(movie_path)
     basename = os.path.splitext(movie_path)[0]
@@ -531,19 +579,19 @@ def save_patches(movie_path, frames, channels):
             df.to_excel(
                 writer, sheet_name=channel_names[c], index=False)
     writer.save()
+
+
 #
 # helper function for testing purposes only
 #
-
-
 def run(movie, parameters, segment=True):
     num_cpus = cpu_count()
     pool = Pool(processes=num_cpus - 1)
     m = Manager()
     q = m.Queue()
-    channels, thresholds, overlap, size_range = parameters
+    channels, thresholds, overlap, size_range, sigma = parameters
     parameter_list = [(q, Parameters(
-        frame, channels, thresholds, overlap, size_range, segment))
+        frame, channels, thresholds, overlap, size_range, segment, sigma))
         for frame in movie]
 
     tic3 = time.time()
@@ -613,16 +661,19 @@ def read_patches_from_file(path):
 
 if __name__ == '__main__':
 
-    path = "/home/daniel/Documents/Image Processing/Mag/for Dan analysis/data/WT 0-30min 2.tif"
+    path = "/home/daniel/Documents/Image Processing/Mag/data/WT 0-30min 2.tif"
     movie_array = imread(path)
     movie = generate_frames(movie_array)
     channels = [2, 0]
     thresholds = [2061, 2735]
     overlap = 0.0
     size_range = (1, 100000)
-    params = [channels, thresholds, overlap, size_range]
+    params = [channels, thresholds, overlap, size_range, 1]
 
     results = run(movie, params)
+
+    # plt.figure()
+    # tp.plot_traj(t1)
     # results = object_colocalisation(movie, params)
     # overlap = 0.2
     # params = [channels, thresholds, overlap, size_range]
@@ -640,3 +691,23 @@ if __name__ == '__main__':
     # patches = read_patches_from_file("WT_channels_20_obcol.xlsx")
     # red = patches[0]
     # print(red[0][0])
+    # img = imread(path)[20, :, :, :]
+    # plt.figure()
+    # plt.imshow(img[2, :, :], interpolation='nearest')
+    # plt.show()
+
+    # # gimg = gaussian(img[2, :, :].astype(float), 1)
+    # # plt.figure()
+    # # plt.imshow(gimg, interpolation='nearest')
+    # # plt.show()
+
+    # frame = Frame(img)
+    # frame.segment([2, 0], [2390, 2140], [1, 1000000])
+
+    # plt.figure()
+    # plt.imshow(frame.labels[2, :, :], interpolation='nearest')
+    # plt.show()
+
+    # plt.figure()
+    # plt.imshow(frame.labels[0, :, :], interpolation='nearest')
+    # plt.show()

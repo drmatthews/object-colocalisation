@@ -45,6 +45,7 @@ class ObcolWorker(QThread):
         self.thresholds = parameters['thresholds']
         self.overlap = parameters['overlap']
         self.size_range = parameters['size_range']
+        self.sigma = parameters['sigma']
         self.segment = parameters['segment']
         self.save_parameters()
         self.start()
@@ -74,7 +75,8 @@ class ObcolWorker(QThread):
             self.thresholds,
             self.overlap,
             self.size_range,
-            self.segment))
+            self.segment,
+            self.sigma))
             for frame in self.movie]
         results = []
         rs = self.pool.map_async(
@@ -102,11 +104,15 @@ class ObcolWorker(QThread):
         self.thresholds = self.parameters['thresholds']
         self.overlap = self.parameters['overlap']
         self.size_range = self.parameters['size_range']
+        self.sigma = self.parameters['sigma']
         results = []
         for i, frame in enumerate(self.movie):
             self.processing_frame.emit(i)
-            frame.segment(
-                self.channels, self.thresholds, self.overlap, self.size_range)
+            frame.segment(self.channels,
+                          self.thresholds,
+                          self.overlap,
+                          self.size_range,
+                          self.sigma)
             results.append(frame)
 
         return results
@@ -128,6 +134,7 @@ class ObcolWorker(QThread):
                        ",".join([str(c) for c in self.thresholds]) + "\n")
             file.write("size range:" +
                        ",".join([str(c) for c in self.size_range]) + "\n")
+            file.write("gaussian filter sigma:" + str(self.sigma) + "\n")
 
     def clear_queue(self):
         while not self.queue.empty():

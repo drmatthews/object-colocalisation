@@ -14,14 +14,64 @@ from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar)
 from matplotlib.figure import Figure
+from skimage.filters import gaussian
 
 from tifffile import imread
+import trackpy as tp
 import utils
 from threads import (ObcolWorker,
                      SaveWorker,
                      ImportWorker)
 
 os.environ["QT_API"] = "pyqt4"
+
+
+class Trajectory(object):
+    def __init__(self, particle):
+        self.pen = QtGui.QPen(QtGui.QColor(255, 255, 255))
+        self.pen.setWidthF(1.0)
+        self.trajectory = self._create_trajectory(particle)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectory[key]
+        elif isinstance(key, slice):
+            return self.trajectory[key.start:key.stop:key.step]
+
+    def _create_trajectory(self, particle):
+        lines = []
+        first = particle.iloc[0]
+        y1 = first['x'].item()
+        x1 = first['y'].item()
+        for pid, p in particle.iterrows():
+            y2 = p['x'].item()
+            x2 = p['y'].item()
+            line = QtGui.QGraphicsLineItem(x1, y1, x2, y2)
+            line.setPen(self.pen)
+            lines.append(line)
+            y1 = p['x'].item()
+            x1 = p['y'].item()
+        return lines
+
+
+class TrajectoryList(object):
+    def __init__(self, tracks):
+        self.trajectories = self._create_trajectory_items(tracks)
+
+    def __len__(self):
+        return len(self.trajectories)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectories[key]
+        elif isinstance(key, slice):
+            return self.trajectories[key.start:key.stop:key.step]
+
+    def _create_trajectory_items(self, tracks):
+        trajectories = []
+        for tid, track in tracks.groupby('particle'):
+            trajectories.append(Trajectory(track))
+        return trajectories
 
 
 class ImportList(QtGui.QWidget):
@@ -268,11 +318,14 @@ class MovieView(QtGui.QGraphicsView):
         self.setRenderHint(QtGui.QPainter.Antialiasing)
         self.scale(1.0, 1.0)
 
-    def show_movie_frame(self, frame, fmin, fmax, threshold=0.0):
+    def show_movie_frame(self, frame, fmin, fmax, sigma, threshold=0.0):
         self.scene.clear()
         # process image
         # save image
         self.data = frame.copy()
+        if sigma > 0.0:
+            self.data = gaussian(self.data.astype(float), sigma=sigma)
+            frame = gaussian(frame.astype(float), sigma=sigma)
         # scale image.
         frame = 255.0 * ((frame - fmin) / (fmax - fmin))
         frame[(frame > 255.0)] = 255.0
@@ -334,8 +387,12 @@ class MovieView(QtGui.QGraphicsView):
         self.image.ndarray1 = frame
         self.image.ndarray2 = frame_RGB
 
-        # add to scene
         self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
+
+    def add_trajectories(self, trajectories):
+        for traj in trajectories:
+            for line in traj:
+                self.scene.addItem(line)
 
     def wheelEvent(self, event):
         if event.delta() > 0:
@@ -381,9 +438,11 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.is_segmentation = False
         self.is_colocalisation = False
         self.thresholds = None
+        self.blur = None
         self.import_paths = []
         self.analysis_data = []
         self.analysis_channels = []
+        self.tracks = None  # needs to be list or dict
 
         # ui conditions
         self.ui.channel_spinbox.setKeyboardTracking(False)
@@ -391,7 +450,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.fmax_spinbox.setKeyboardTracking(False)
 
         # signals
-        self.ui.tabWidget.currentChanged.connect(self.handle_tab_change)
+        # self.ui.tabWidget.currentChanged.connect(self.handle_tab_change)
         self.ui.open_button.clicked.connect(self.load_movie)
         self.ui.save_button.clicked.connect(self.save)
         self.ui.quit_button.clicked.connect(self.quit)
@@ -414,6 +473,12 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.handle_threshold_slider)
         self.ui.threshold_spinbox.valueChanged.connect(
             self.handle_threshold_spinbox)
+        self.ui.blur_slider.sliderReleased.connect(
+            self.handle_blur_slider_released)
+        self.ui.blur_slider.valueChanged.connect(
+            self.handle_blur_slider)
+        self.ui.blur_spinbox.valueChanged.connect(
+            self.handle_blur_spinbox)
         self.ui.run_button.clicked.connect(self.start_obcol_thread)
         self.ui.movie_radio.toggled.connect(self.handle_radio_state)
         self.ui.result_radio.toggled.connect(self.handle_radio_state)
@@ -455,10 +520,10 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.import_worker.progress_range.connect(self.update_progress_range)
 
     # slots
-    def handle_tab_change(self):
-        self.curr_frame = 0
-        self.ui.frame_slider.setValue(0)
-        self.ui.coloc_frame_slider.setValue(0)
+    # def handle_tab_change(self):
+    #     self.curr_frame = 0
+    #     self.ui.frame_slider.setValue(0)
+    #     self.ui.coloc_frame_slider.setValue(0)
 
     def handle_frame_slider(self, value):
         # print("is_movie", self.is_movie)
@@ -480,8 +545,8 @@ class MainGUIWindow(QtGui.QMainWindow):
                 self.get_frame(-1)
             self.old_coloc_f = curr_f
             data_type = self.ui.data_combobox.currentIndex()
-            coloc_channel = self.ui.channel_combobox.currentIndex()
-            self.update_histogram(data_type, coloc_channel)
+            self.update_histogram(data_type,
+                                  self.ui.channel_combobox.currentIndex())
 
     def handle_channel_spinbox(self, value):
         self.curr_channel = value
@@ -523,6 +588,22 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.threshold_slider.value())
         self.update_display()
 
+    def handle_blur_slider(self, value):
+        val = float(value) / 8
+        self.ui.blur_spinbox.setValue(val)
+
+    def handle_blur_slider_released(self):
+        self.blur = float(
+            self.ui.blur_slider.value()) / 8
+        self.update_display()
+
+    def handle_blur_spinbox(self, value):
+        val = int(value * 8)
+        self.ui.blur_slider.setValue(val)
+        self.blur = float(
+            self.ui.blur_slider.value()) / 8
+        self.update_display()
+
     def handle_radio_state(self):
         radio = self.sender()
         if radio.text() == "Movie":
@@ -546,6 +627,7 @@ class MainGUIWindow(QtGui.QMainWindow):
     def handle_channel_combo(self, value):
         data_type = self.ui.data_combobox.currentIndex()
         self.update_histogram(data_type, value)
+        self.update_display()
 
     # def handle_analysis_channel_combo(self, value):
     #     data_type = self.ui.analysis_data_combobox.currentIndex()
@@ -566,8 +648,8 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.max_size_spinbox_2.setValue(value)
 
     def handle_data_combo(self, value):
-        channel = self.ui.channel_combobox.currentIndex()
-        self.update_histogram(value, channel)
+        self.curr_seg_channel = self.ui.channel_combobox.currentIndex()
+        self.update_histogram(value, self.curr_seg_channel)
 
     def handle_analysis_data_combo(self, value):
         self.update_analysis_plot(value)
@@ -697,7 +779,6 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.import_worker.start_thread(self.import_paths)
 
     def complete_import(self, results):
-        print("import complete")
         self.update_progress(0)
 
         if (len(self.analysis_data) > 0 and
@@ -711,7 +792,6 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         self.list_view.update(self.import_paths)
         self.list_view.set_selected(0)
-        print("analysis_channels", self.analysis_channels)
         data_type = self.ui.analysis_data_combobox.currentIndex()
         self.analysis_view.draw(
             self.analysis_data, data_type, self.analysis_channels)
@@ -734,6 +814,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         params['overlap'] = overlap
         params['size_range'] = (min_size, max_size)
         params['segment'] = segment
+        params['sigma'] = self.blur
         self.params = params
         return params
 
@@ -775,7 +856,6 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         # and channels that will be analysed
         self.analysis_channels.append(self.params['channels'])
-        print("analyis_channels", self.analysis_channels)
         # prepare the data for the stats plot
         self.analysis_data.append(utils.convert_frames_to_patches(
             result, self.params['channels']))
@@ -832,15 +912,17 @@ class MainGUIWindow(QtGui.QMainWindow):
                 frame,
                 self.fmin,
                 self.fmax,
+                self.blur,
                 self.thresholds[self.curr_channel])
         if self.is_segmentation:
             sr = self.segmentation_result[self.curr_frame]
-            current_labels = (
-                sr.get_mono_labels())
-            frame = (
-                np.ascontiguousarray(current_labels))
+            current_labels = sr.get_mono_labels()
+            frame = np.ascontiguousarray(current_labels)
+
             self.movie_view.show_segmentation_frame(frame)
+
             self.coloc_view.show_segmentation_frame(frame)
+
         if self.is_colocalisation:
             cr = self.colocalisation_result[self.curr_frame]
             current_labels = (
