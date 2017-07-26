@@ -5,6 +5,7 @@ from PyQt4.QtCore import QThread
 from PyQt4.QtCore import Signal
 import pandas as pd
 import numpy as np
+from collections import OrderedDict
 from tifffile import imsave
 from multiprocessing import Pool, Manager, cpu_count
 
@@ -197,7 +198,8 @@ class SaveWorker(QThread):
         counter = 0
         for c, channel in enumerate(channels):
             labels = []
-            output = []
+            obcol = []
+            vesicle_sizes = OrderedDict()
             for frame_id, frame in enumerate(frames):
 
                 movie_array[frame_id, c, :, :] = (
@@ -205,13 +207,17 @@ class SaveWorker(QThread):
 
                 labels.append(frame.labels[channel, :, :])
 
+                vkey = "frame_{}".format(str(frame_id).zfill(3))
+                vesicle_sizes[vkey] = []
+
                 self.progress_signal.emit(counter)
                 self.progress_message.emit(
                     "Saving object colocalisation results: {}%".format(
                         int((float(counter) / float(2 * len(frames))) * 100)))
+
                 if len(frame.patches[channel]) > 0:
                     for patch in frame.patches[channel]:
-                        output.append(
+                        obcol.append(
                             [frame_id,
                              patch.id,
                              patch.centroid[0],
@@ -222,24 +228,36 @@ class SaveWorker(QThread):
                              patch.size_overlapped,
                              patch.signal,
                              float(patch.size_overlapped) / float(patch.size)])
-                else:
-                    output.append([frame_id] + [0.0 for i in range(9)])
 
-                df = pd.DataFrame(output)
-                df.columns = [
-                    "frame id",
-                    "patch id",
-                    "centroid x",
-                    "centroid y",
-                    "intensity",
-                    "channel",
-                    "size",
-                    "size overlapped",
-                    "signal",
-                    "fraction overlapped"]
-                df.to_excel(
-                    writer, sheet_name=channel_names[c], index=False)
+                        vesicle_sizes[vkey].append(patch.size)
+                else:
+                    obcol.append([frame_id] + [0.0 for i in range(9)])
+
                 counter += 1
+
+            obcol_df = pd.DataFrame(obcol)
+            obcol_df.columns = [
+                "frame id",
+                "patch id",
+                "centroid x",
+                "centroid y",
+                "intensity",
+                "channel",
+                "size",
+                "size overlapped",
+                "signal",
+                "fraction overlapped"]
+
+            obcol_df.to_excel(
+                writer, sheet_name=channel_names[c], index=False)
+
+            vsize_df = pd.DataFrame().from_dict(vesicle_sizes, orient='index')
+            vsize_df['mean'] = vsize_df.mean(axis=1)
+            vsize_df['std'] = vsize_df.std(axis=1)
+            vsize_df.to_excel(
+                writer,
+                sheet_name="{} vesicle size".format(channel_names[c]),
+                index=True)
 
             label_array = np.rollaxis(np.dstack(labels), -1)
             label_filename = (
