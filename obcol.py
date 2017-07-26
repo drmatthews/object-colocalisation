@@ -366,7 +366,7 @@ class MovieView(QtGui.QGraphicsView):
         # add to scene
         self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
 
-    def show_segmentation_frame(self, frame):
+    def show_segmentation_frame(self, frame, trajectories=None):
         self.scene.clear()
         # process image
         # save image
@@ -388,6 +388,9 @@ class MovieView(QtGui.QGraphicsView):
         self.image.ndarray2 = frame_RGB
 
         self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
+
+        if trajectories:
+            self.add_trajectories(trajectories)
 
     def add_trajectories(self, trajectories):
         for traj in trajectories:
@@ -434,6 +437,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.old_f = 1
         self.old_coloc_f = 1
         self.curr_channel = 0
+        self.curr_seg_channel = 0
         self.is_movie = False
         self.is_segmentation = False
         self.is_colocalisation = False
@@ -537,6 +541,8 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.old_f = curr_f
 
     def handle_coloc_frame_slider(self, value):
+        print(value)
+        print("self.old_coloc_f", self.old_coloc_f)
         if self.is_segmentation:
             curr_f = value
             if curr_f > self.old_coloc_f:
@@ -625,6 +631,7 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.display_frame()
 
     def handle_channel_combo(self, value):
+        self.curr_seg_channel = value
         data_type = self.ui.data_combobox.currentIndex()
         self.update_histogram(data_type, value)
         self.update_display()
@@ -829,6 +836,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def obcol_plotter(self, result):
         self.segmentation_result = result
+        self.tracks = utils.track(result, self.params['channels'])
         # update GUI parameters
         self.is_segmentation = True
         self.is_movie = False
@@ -919,9 +927,12 @@ class MainGUIWindow(QtGui.QMainWindow):
             current_labels = sr.get_mono_labels()
             frame = np.ascontiguousarray(current_labels)
 
-            self.movie_view.show_segmentation_frame(frame)
+            trajectories = TrajectoryList(self.tracks[self.curr_seg_channel])
+            self.movie_view.show_segmentation_frame(
+                frame, trajectories[0: self.curr_frame])
 
-            self.coloc_view.show_segmentation_frame(frame)
+            self.coloc_view.show_segmentation_frame(
+                frame)
 
         if self.is_colocalisation:
             cr = self.colocalisation_result[self.curr_frame]
