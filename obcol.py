@@ -459,8 +459,10 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.save_button.clicked.connect(self.save)
         self.ui.quit_button.clicked.connect(self.quit)
         self.ui.import_button.clicked.connect(self.import_patches)
+        self.ui.frame_slider.installEventFilter(self)
         self.ui.frame_slider.valueChanged.connect(
             self.handle_frame_slider)
+        self.ui.coloc_frame_slider.installEventFilter(self)
         self.ui.coloc_frame_slider.valueChanged.connect(
             self.handle_coloc_frame_slider)
         self.ui.channel_spinbox.valueChanged.connect(
@@ -528,6 +530,12 @@ class MainGUIWindow(QtGui.QMainWindow):
     #     self.curr_frame = 0
     #     self.ui.frame_slider.setValue(0)
     #     self.ui.coloc_frame_slider.setValue(0)
+
+    def eventFilter(self, source, event):
+        if (event.type() == QtCore.QEvent.Wheel):
+            return True
+        else:
+            return False    
 
     def handle_frame_slider(self, value):
         # print("is_movie", self.is_movie)
