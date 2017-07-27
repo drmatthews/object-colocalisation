@@ -199,7 +199,12 @@ class SaveWorker(QThread):
         for c, channel in enumerate(channels):
             labels = []
             obcol = []
+
+            vesicle_number = OrderedDict()
             vesicle_sizes = OrderedDict()
+            vesicle_signals = OrderedDict()
+            vesicle_overlaps = OrderedDict()
+
             for frame_id, frame in enumerate(frames):
 
                 movie_array[frame_id, c, :, :] = (
@@ -207,8 +212,11 @@ class SaveWorker(QThread):
 
                 labels.append(frame.labels[channel, :, :])
 
-                vkey = "frame_{}".format(str(frame_id).zfill(3))
-                vesicle_sizes[vkey] = []
+                fkey = "frame_{}".format(str(frame_id).zfill(3))
+                vesicle_number[fkey] = len(frame.patches[channel])
+                vesicle_sizes[fkey] = []
+                vesicle_signals[fkey] = []
+                vesicle_overlaps[fkey] = []
 
                 self.progress_signal.emit(counter)
                 self.progress_message.emit(
@@ -229,7 +237,10 @@ class SaveWorker(QThread):
                              patch.signal,
                              float(patch.size_overlapped) / float(patch.size)])
 
-                        vesicle_sizes[vkey].append(patch.size)
+                        vesicle_sizes[fkey].append(patch.size)
+                        vesicle_signals[fkey].append(patch.signal)
+                        vesicle_overlaps[fkey].append(
+                            float(patch.size_overlapped) / float(patch.size))
                 else:
                     obcol.append([frame_id] + [0.0 for i in range(9)])
 
@@ -251,12 +262,38 @@ class SaveWorker(QThread):
             obcol_df.to_excel(
                 writer, sheet_name=channel_names[c], index=False)
 
+            vnumber_df = pd.DataFrame().from_dict(
+                vesicle_number, orient='index')
+            vnumber_df.columns = ['num vesicles per frame']
+            vnumber_df.to_excel(
+                writer,
+                sheet_name="{} vesicle number".format(channel_names[c]),
+                index=True)
+
             vsize_df = pd.DataFrame().from_dict(vesicle_sizes, orient='index')
             vsize_df['mean'] = vsize_df.mean(axis=1)
             vsize_df['std'] = vsize_df.std(axis=1)
             vsize_df.to_excel(
                 writer,
                 sheet_name="{} vesicle size".format(channel_names[c]),
+                index=True)
+
+            vsignal_df = pd.DataFrame().from_dict(
+                vesicle_signals, orient='index')
+            vsignal_df['mean'] = vsignal_df.mean(axis=1)
+            vsignal_df['std'] = vsignal_df.std(axis=1)
+            vsignal_df.to_excel(
+                writer,
+                sheet_name="{} vesicle signal".format(channel_names[c]),
+                index=True)
+
+            voverlap_df = pd.DataFrame().from_dict(
+                vesicle_overlaps, orient='index')
+            voverlap_df['mean'] = voverlap_df.mean(axis=1)
+            voverlap_df['std'] = voverlap_df.std(axis=1)
+            voverlap_df.to_excel(
+                writer,
+                sheet_name="{} vesicle overlap".format(channel_names[c]),
                 index=True)
 
             label_array = np.rollaxis(np.dstack(labels), -1)
