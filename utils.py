@@ -519,8 +519,8 @@ def convert_to_features(frames, channel):
     for frame_id, frame in enumerate(frames):
         for patch in frame.patches[channel]:
             output.append(
-                [patch.centroid[0],
-                 patch.centroid[1],
+                [patch.centroid[1],
+                 patch.centroid[0],
                  frame_id,
                  patch.id])
 
@@ -659,6 +659,50 @@ def read_patches_from_file(path):
         raise ValueError("Input data must be in Excel format")
 
 
+class Trajectory(object):
+    def __init__(self, particle):
+        self.trajectory = self._create_trajectory(particle)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectory[key]
+        elif isinstance(key, slice):
+            return self.trajectory[key.start:key.stop:key.step]
+
+    def _create_trajectory(self, particle):
+        lines = []
+        first = particle.iloc[0]
+        x1 = first['x'].item()
+        y1 = first['y'].item()
+        for pid, p in particle.iterrows():
+            x2 = p['x'].item()
+            y2 = p['y'].item()
+            lines.append((x1, y1, x2, y2))
+            x1 = p['x'].item()
+            y1 = p['y'].item()
+        return lines
+
+
+class TrajectoryList(object):
+    def __init__(self, tracks):
+        self.trajectories = self._create_trajectory_items(tracks)
+
+    def __len__(self):
+        return len(self.trajectories)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectories[key]
+        elif isinstance(key, slice):
+            return self.trajectories[key.start:key.stop:key.step]
+
+    def _create_trajectory_items(self, tracks):
+        trajectories = []
+        for tid, track in tracks.groupby('particle'):
+            trajectories.append(Trajectory(track))
+        return trajectories
+
+
 if __name__ == '__main__':
 
     path = "/home/daniel/Documents/Image Processing/Mag/data/WT 0-30min 2.tif"
@@ -672,8 +716,22 @@ if __name__ == '__main__':
 
     results = run(movie, params)
 
-    # plt.figure()
-    # tp.plot_traj(t1)
+    features = convert_to_features(results, 2)
+    t = tp.link_df(features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
+    t1 = tp.filter_stubs(t, 10)
+    plt.figure()
+    tp.plot_traj(t1)
+    for pid, particle in t1.groupby('particle'):
+        if pid == 0.0:
+            print(particle)
+
+    trajs = TrajectoryList(t1)
+    for trajid, traj in enumerate(trajs):
+        if trajid == 0:
+            print(traj.trajectory)
+
+    unstacked = t1.set_index(['particle', 'frame'])[['x', 'y']].unstack()
+    print(unstacked.head())
     # results = object_colocalisation(movie, params)
     # overlap = 0.2
     # params = [channels, thresholds, overlap, size_range]

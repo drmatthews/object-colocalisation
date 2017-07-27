@@ -5,6 +5,7 @@ from PyQt4.QtCore import QThread
 from PyQt4.QtCore import Signal
 import pandas as pd
 import numpy as np
+from collections import OrderedDict
 from tifffile import imsave
 from multiprocessing import Pool, Manager, cpu_count
 

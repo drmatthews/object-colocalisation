@@ -41,16 +41,16 @@ class Trajectory(object):
     def _create_trajectory(self, particle):
         lines = []
         first = particle.iloc[0]
-        y1 = first['x'].item()
-        x1 = first['y'].item()
+        x1 = first['x'].item()
+        y1 = first['y'].item()
         for pid, p in particle.iterrows():
-            y2 = p['x'].item()
-            x2 = p['y'].item()
+            x2 = p['x'].item()
+            y2 = p['y'].item()
             line = QtGui.QGraphicsLineItem(x1, y1, x2, y2)
             line.setPen(self.pen)
             lines.append(line)
-            y1 = p['x'].item()
-            x1 = p['y'].item()
+            x1 = p['x'].item()
+            y1 = p['y'].item()
         return lines
 
 
@@ -535,29 +535,31 @@ class MainGUIWindow(QtGui.QMainWindow):
         if (event.type() == QtCore.QEvent.Wheel):
             return True
         else:
-            return False    
+            return False
 
     def handle_frame_slider(self, value):
         # print("is_movie", self.is_movie)
         # print("is_segmentation", self.is_segmentation)
         if self.is_movie or self.is_segmentation:
-            curr_f = value
-            if curr_f > self.old_f:
-                self.get_frame(1)
-            else:
-                self.get_frame(-1)
-            self.old_f = curr_f
+            # curr_f = value
+            # if curr_f > self.old_f:
+            #     self.get_frame(1)
+            # else:
+            #     self.get_frame(-1)
+            # self.old_f = curr_f
+            self.get_frame(int(value))
 
     def handle_coloc_frame_slider(self, value):
         print(value)
         print("self.old_coloc_f", self.old_coloc_f)
         if self.is_segmentation:
-            curr_f = value
-            if curr_f > self.old_coloc_f:
-                self.get_frame(1)
-            else:
-                self.get_frame(-1)
-            self.old_coloc_f = curr_f
+            # curr_f = value
+            # if curr_f > self.old_coloc_f:
+            #     self.get_frame(1, self.sender())
+            # else:
+            #     self.get_frame(-1, self.sender())
+            # self.old_coloc_f = curr_f
+            self.get_frame(int(value))
             data_type = self.ui.data_combobox.currentIndex()
             self.update_histogram(data_type,
                                   self.ui.channel_combobox.currentIndex())
@@ -950,8 +952,8 @@ class MainGUIWindow(QtGui.QMainWindow):
                 np.ascontiguousarray(current_labels))
             self.coloc_view.show_segmentation_frame(filtered)
 
-    def get_frame(self, step):
-        self.curr_frame += step
+    def get_frame(self, value):
+        self.curr_frame = value
         if (self.curr_frame < 0):
             self.curr_frame = 0
         if (self.curr_frame >= self.num_frames):
