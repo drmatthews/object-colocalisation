@@ -40,6 +40,7 @@ class Frame(object):
         self.red_overlaps = []
         self.green_overlaps = []
         self.patches = {}
+        self.patch_ids = {}
         self.size_range = ()
         self.sigma = 1
         Frame.frame_num += 1
@@ -172,6 +173,7 @@ class Frame(object):
         """
         props = regionprops(labels[channel, :, :], image[channel, :, :])
         patches = Patches()
+        self.patch_ids[channel] = []
         for p in props:
             if p.area > size_range[0] and p.area < size_range[1]:
                 patches.add(Patch(
@@ -181,6 +183,7 @@ class Frame(object):
                      p.centroid,
                      p.intensity_image,
                      channel]))
+                self.patch_ids[channel].append(p.label)
             else:
                 idx = labels[channel, :, :] == p.label
                 labels[channel, idx] = 0
@@ -243,7 +246,7 @@ class Frame(object):
                 overlap_size = float(len(np.where(pix > 0)[0]))
 
                 # identify the Patch object that belongs to this region
-                patch = self._identify_patch(flabel, channel)
+                patch = self.identify_patch(flabel, channel)
 
                 # calculate the colocalisation parameters for that patch
                 patch.fraction_overlapped = overlap_size / object_size
@@ -269,7 +272,7 @@ class Frame(object):
             lidx = np.where(channel_labels == label_id)
             channel_labels[lidx] = 0
 
-    def _identify_patch(self, label_id, channel):
+    def identify_patch(self, label_id, channel):
         """Return a Patch object for the specified label_id
         in the specified channel"""
         pout = [patch for patch in self.patches[channel]
@@ -418,6 +421,62 @@ class Patches(object):
             fraction.append(patch.fraction_overlapped)
         return fraction
 
+
+class Trajectory(object):
+    def __init__(self, particle):
+        self.particle = particle
+        self.patches = self._patches_from_particle(particle)
+        self.trajectory = self._create_trajectory(particle)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectory[key]
+        elif isinstance(key, slice):
+            return self.trajectory[key.start:key.stop:key.step]
+
+    def _patches_from_particle(self, particle):
+        patches = {}
+        frame_ids = particle['frame'].values
+        patch_ids = particle['patch id'].values
+        for fid, pid in zip(frame_ids, patch_ids):
+            patches[str(fid)] = pid
+        return patches
+
+    def _create_trajectory(self, particle):
+        lines = []
+        first = particle.iloc[0]
+        x1 = first['x'].item()
+        y1 = first['y'].item()
+        for pid, p in particle.iterrows():
+            x2 = p['x'].item()
+            y2 = p['y'].item()
+            lines.append((x1, y1, x2, y2))
+            x1 = p['x'].item()
+            y1 = p['y'].item()
+        return lines
+
+
+class TrajectoryList(object):
+    def __init__(self, tracks):
+        self.trajectories = self._create_trajectories(tracks)
+        self.max_particle_id = tracks['particle'].max()
+        print("max_particle_id", self.max_particle_id)
+
+    def __len__(self):
+        return len(self.trajectories)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectories[key]
+        elif isinstance(key, slice):
+            return self.trajectories[key.start:key.stop:key.step]
+
+    def _create_trajectories(self, tracks):
+        trajectories = []
+        for tid, track in tracks.groupby('particle'):
+            trajectories.append(Trajectory(track))
+        return trajectories
+
 #
 # helpers for GUI
 #
@@ -519,8 +578,8 @@ def convert_to_features(frames, channel):
     for frame_id, frame in enumerate(frames):
         for patch in frame.patches[channel]:
             output.append(
-                [patch.centroid[0],
-                 patch.centroid[1],
+                [patch.centroid[1],
+                 patch.centroid[0],
                  frame_id,
                  patch.id])
 
@@ -539,7 +598,14 @@ def track(frames, channels):
         features = convert_to_features(frames, channel)
         t = tp.link_df(
             features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
-        tracks.append(tp.filter_stubs(t, 10))
+        t1 = tp.filter_stubs(t, 10)
+        particles = t1.particle.unique()
+        particle_reset = 0
+        for p in particles:
+            t1.loc[t1['particle'] == p, 'particle'] = particle_reset
+            particle_reset += 1
+        print(t1.head())
+        tracks.append(TrajectoryList(t1))
     return tracks
 
 
@@ -672,8 +738,22 @@ if __name__ == '__main__':
 
     results = run(movie, params)
 
-    # plt.figure()
-    # tp.plot_traj(t1)
+    features = convert_to_features(results, 2)
+    t = tp.link_df(features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
+    t1 = tp.filter_stubs(t, 10)
+    plt.figure()
+    tp.plot_traj(t1)
+    for pid, particle in t1.groupby('particle'):
+        if pid == 0.0:
+            print(particle)
+
+    trajs = TrajectoryList(t1)
+    for trajid, traj in enumerate(trajs):
+        if trajid == 0:
+            print(traj.trajectory)
+
+    unstacked = t1.set_index(['particle', 'frame'])[['x', 'y']].unstack()
+    print(unstacked.head())
     # results = object_colocalisation(movie, params)
     # overlap = 0.2
     # params = [channels, thresholds, overlap, size_range]

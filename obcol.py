@@ -26,11 +26,11 @@ from threads import (ObcolWorker,
 os.environ["QT_API"] = "pyqt4"
 
 
-class Trajectory(object):
-    def __init__(self, particle):
+class TrajectoryItem(object):
+    def __init__(self, traj):
         self.pen = QtGui.QPen(QtGui.QColor(255, 255, 255))
         self.pen.setWidthF(1.0)
-        self.trajectory = self._create_trajectory(particle)
+        self.trajectory = self._create_trajectory(traj)
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -38,23 +38,16 @@ class Trajectory(object):
         elif isinstance(key, slice):
             return self.trajectory[key.start:key.stop:key.step]
 
-    def _create_trajectory(self, particle):
+    def _create_trajectory(self, traj):
         lines = []
-        first = particle.iloc[0]
-        y1 = first['x'].item()
-        x1 = first['y'].item()
-        for pid, p in particle.iterrows():
-            y2 = p['x'].item()
-            x2 = p['y'].item()
-            line = QtGui.QGraphicsLineItem(x1, y1, x2, y2)
+        for t in traj:
+            line = QtGui.QGraphicsLineItem(*t)
             line.setPen(self.pen)
             lines.append(line)
-            y1 = p['x'].item()
-            x1 = p['y'].item()
         return lines
 
 
-class TrajectoryList(object):
+class TrajectoryItemList(object):
     def __init__(self, tracks):
         self.trajectories = self._create_trajectory_items(tracks)
 
@@ -69,8 +62,8 @@ class TrajectoryList(object):
 
     def _create_trajectory_items(self, tracks):
         trajectories = []
-        for tid, track in tracks.groupby('particle'):
-            trajectories.append(Trajectory(track))
+        for track in tracks:
+            trajectories.append(TrajectoryItem(track))
         return trajectories
 
 
@@ -366,7 +359,7 @@ class MovieView(QtGui.QGraphicsView):
         # add to scene
         self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
 
-    def show_segmentation_frame(self, frame):
+    def show_segmentation_frame(self, frame, trajectories=None):
         self.scene.clear()
         # process image
         # save image
@@ -388,6 +381,9 @@ class MovieView(QtGui.QGraphicsView):
         self.image.ndarray2 = frame_RGB
 
         self.scene.addPixmap(QtGui.QPixmap.fromImage(self.image))
+
+        if trajectories:
+            self.add_trajectories(trajectories)
 
     def add_trajectories(self, trajectories):
         for traj in trajectories:
@@ -434,6 +430,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.old_f = 1
         self.old_coloc_f = 1
         self.curr_channel = 0
+        self.curr_seg_channel = 0
         self.is_movie = False
         self.is_segmentation = False
         self.is_colocalisation = False
@@ -510,7 +507,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         # threads
         self.obcol_worker = ObcolWorker(self)
-        self.obcol_worker.results_signal.connect(self.obcol_plotter)
+        self.obcol_worker.results_signal.connect(self.post_processing)
         self.obcol_worker.progress_signal.connect(self.update_progress)
         self.obcol_worker.progress_message.connect(self.update_progress_text)
         self.save_worker = SaveWorker(self)
@@ -538,21 +535,25 @@ class MainGUIWindow(QtGui.QMainWindow):
         # print("is_movie", self.is_movie)
         # print("is_segmentation", self.is_segmentation)
         if self.is_movie or self.is_segmentation:
-            curr_f = value
-            if curr_f > self.old_f:
-                self.get_frame(1)
-            else:
-                self.get_frame(-1)
-            self.old_f = curr_f
+            # curr_f = value
+            # if curr_f > self.old_f:
+            #     self.get_frame(1)
+            # else:
+            #     self.get_frame(-1)
+            # self.old_f = curr_f
+            self.get_frame(int(value))
 
     def handle_coloc_frame_slider(self, value):
+        print(value)
+        print("self.old_coloc_f", self.old_coloc_f)
         if self.is_segmentation:
-            curr_f = value
-            if curr_f > self.old_coloc_f:
-                self.get_frame(1)
-            else:
-                self.get_frame(-1)
-            self.old_coloc_f = curr_f
+            # curr_f = value
+            # if curr_f > self.old_coloc_f:
+            #     self.get_frame(1, self.sender())
+            # else:
+            #     self.get_frame(-1, self.sender())
+            # self.old_coloc_f = curr_f
+            self.get_frame(int(value))
             data_type = self.ui.data_combobox.currentIndex()
             self.update_histogram(data_type,
                                   self.ui.channel_combobox.currentIndex())
@@ -634,6 +635,7 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.display_frame()
 
     def handle_channel_combo(self, value):
+        self.curr_seg_channel = value
         data_type = self.ui.data_combobox.currentIndex()
         self.update_histogram(data_type, value)
         self.update_display()
@@ -770,7 +772,7 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.progress_bar.setMaximum(2 * self.num_frames)
             self.save_worker.finished_signal.connect(self.complete_save)
             self.save_worker.start_thread(
-                self.segmentation_result,
+                (self.segmentation_result, self.tracks),
                 self.params['channels'],
                 self.movie_path)
 
@@ -836,8 +838,9 @@ class MainGUIWindow(QtGui.QMainWindow):
         params = self.prepare_parameters()
         self.obcol_worker.start_thread(self.movie, params)
 
-    def obcol_plotter(self, result):
-        self.segmentation_result = result
+    def post_processing(self, result):
+        self.segmentation_result = result[0]
+        self.tracks = result[1]
         # update GUI parameters
         self.is_segmentation = True
         self.is_movie = False
@@ -851,7 +854,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.movie_radio.setChecked(False)
         # plot the histogram for each frame
         channel = self.params['channels'][0]
-        self.histogram_view.draw(result[0], 0, channel)
+        self.histogram_view.draw(self.segmentation_result[0], 0, channel)
 
         # now to plot overall stats effectively do an import
         # update the paths
@@ -867,7 +870,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.analysis_channels.append(self.params['channels'])
         # prepare the data for the stats plot
         self.analysis_data.append(utils.convert_frames_to_patches(
-            result, self.params['channels']))
+            self.segmentation_result, self.params['channels']))
 
         # and update the overall stats plot
         self.analysis_view.draw(self.analysis_data, 0, self.analysis_channels)
@@ -928,9 +931,13 @@ class MainGUIWindow(QtGui.QMainWindow):
             current_labels = sr.get_mono_labels()
             frame = np.ascontiguousarray(current_labels)
 
-            self.movie_view.show_segmentation_frame(frame)
+            trajectories = TrajectoryItemList(
+                self.tracks[self.curr_seg_channel])
+            self.movie_view.show_segmentation_frame(
+                frame, trajectories[0: self.curr_frame])
 
-            self.coloc_view.show_segmentation_frame(frame)
+            self.coloc_view.show_segmentation_frame(
+                frame)
 
         if self.is_colocalisation:
             cr = self.colocalisation_result[self.curr_frame]
@@ -940,8 +947,8 @@ class MainGUIWindow(QtGui.QMainWindow):
                 np.ascontiguousarray(current_labels))
             self.coloc_view.show_segmentation_frame(filtered)
 
-    def get_frame(self, step):
-        self.curr_frame += step
+    def get_frame(self, value):
+        self.curr_frame = value
         if (self.curr_frame < 0):
             self.curr_frame = 0
         if (self.curr_frame >= self.num_frames):
