@@ -370,10 +370,16 @@ class Ui_MainWindow(object):
         self.menubar = QtGui.QMenuBar(MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1066, 25))
         self.menubar.setObjectName(_fromUtf8("menubar"))
+        self.menuFile = QtGui.QMenu(self.menubar)
+        self.menuFile.setObjectName(_fromUtf8("menuFile"))
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtGui.QStatusBar(MainWindow)
         self.statusbar.setObjectName(_fromUtf8("statusbar"))
         MainWindow.setStatusBar(self.statusbar)
+        self.actionOpen = QtGui.QAction(MainWindow)
+        self.actionOpen.setObjectName(_fromUtf8("actionOpen"))
+        self.menuFile.addAction(self.actionOpen)
+        self.menubar.addAction(self.menuFile.menuAction())
 
         self.retranslateUi(MainWindow)
         self.tabWidget.setCurrentIndex(0)
@@ -420,4 +426,6 @@ class Ui_MainWindow(object):
         self.open_button.setText(_translate("MainWindow", "Open", None))
         self.save_button.setText(_translate("MainWindow", "Save", None))
         self.quit_button.setText(_translate("MainWindow", "Quit", None))
+        self.menuFile.setTitle(_translate("MainWindow", "File", None))
+        self.actionOpen.setText(_translate("MainWindow", "Open", None))
 
