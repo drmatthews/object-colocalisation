@@ -772,7 +772,7 @@ class MainGUIWindow(QtGui.QMainWindow):
             self.ui.progress_bar.setMaximum(2 * self.num_frames)
             self.save_worker.finished_signal.connect(self.complete_save)
             self.save_worker.start_thread(
-                self.segmentation_result,
+                (self.segmentation_result, self.tracks),
                 self.params['channels'],
                 self.movie_path)
 

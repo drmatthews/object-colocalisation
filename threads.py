@@ -172,9 +172,21 @@ class SaveWorker(QThread):
         """
         Method called from the GUI
         """
-        self.data = data
+        self.frames = data[0]
+        self.tracks = data[1]
         self.channels = channels
-        self.path = path
+        self.movie_path = path
+        self.basepath = os.path.dirname(path)
+        self.basename = os.path.splitext(path)[0]
+
+        self.channel_str = "_channels_"
+        for channel in self.channels:
+            self.channel_str += str(channel)
+
+        self.path = os.path.join(
+            self.basepath, self.basename + self.channel_str + '_obcol.xlsx')
+        self.writer = pd.ExcelWriter(self.path)
+        self.channel_names = ["red", "green"]
         self.start()
 
     def run(self):
@@ -183,31 +195,20 @@ class SaveWorker(QThread):
         """
         if self.is_stopped():
             return
-        self.save()
+        self.save_obcol(self.frames)
+        self.save_tracks(self.tracks)
+        self.writer.save()
         self.finished_signal.emit(0)
 
-    def save(self):
-        frames = self.data
+    def save_obcol(self, frames):
 
         movie_array = np.zeros(
             (len(frames), 2, frames[0].height, frames[0].width))
 
         labels = []
-
-        movie_path = self.path
-        channels = self.channels
-        basepath = os.path.dirname(movie_path)
-        basename = os.path.splitext(movie_path)[0]
-
-        channel_str = "_channels_"
-        for channel in channels:
-            channel_str += str(channel)
-
-        path = os.path.join(basepath, basename + channel_str + '_obcol.xlsx')
-        self.writer = pd.ExcelWriter(path)
-        channel_names = ["red", "green"]
+        channel_names = self.channel_names
         counter = 0
-        for c, channel in enumerate(channels):
+        for c, channel in enumerate(self.channels):
             labels = []
             obcol = []
 
@@ -217,6 +218,11 @@ class SaveWorker(QThread):
             vesicle_overlaps = OrderedDict()
 
             for frame_id, frame in enumerate(frames):
+
+                self.progress_signal.emit(counter)
+                self.progress_message.emit(
+                    "Saving object colocalisation results: {}%".format(
+                        int((float(counter) / float(2 * len(frames))) * 100)))
 
                 movie_array[frame_id, c, :, :] = (
                     frame.get_mono_labels_in_channel(channel))
@@ -228,11 +234,6 @@ class SaveWorker(QThread):
                 vesicle_sizes[fkey] = []
                 vesicle_signals[fkey] = []
                 vesicle_overlaps[fkey] = []
-
-                self.progress_signal.emit(counter)
-                self.progress_message.emit(
-                    "Saving object colocalisation results: {}%".format(
-                        int((float(counter) / float(2 * len(frames))) * 100)))
 
                 if len(frame.patches[channel]) > 0:
                     for patch in frame.patches[channel]:
@@ -292,21 +293,75 @@ class SaveWorker(QThread):
 
             label_array = np.rollaxis(np.dstack(labels), -1)
             label_filename = (
-                basename + channel_str +
+                self.basename + self.channel_str +
                 '_{}labels.tif'.format(channel_names[c]))
             imsave(
-                os.path.join(basepath, label_filename),
+                os.path.join(self.basepath, label_filename),
                 label_array.astype(np.uint8),
                 compress=6,
                 metadata={'axes': 'TYX'})
 
         imsave(
-            os.path.join(basepath, basename + channel_str + '_segmented.tif'),
+            os.path.join(self.basepath,
+                         self.basename + self.channel_str + '_segmented.tif'),
             movie_array.astype(np.uint8),
             compress=6,
             metadata={'axes': 'TCYX'})
 
-        self.writer.save()
+    def save_tracks(self, tracks):
+        frames = self.frames
+        channel_names = self.channel_names
+        counter = 0
+        for c, channel in enumerate(self.channels):
+
+            vesicle_sizes = OrderedDict()
+            vesicle_signals = OrderedDict()
+            vesicle_overlaps = OrderedDict()
+            for fid, frame in enumerate(frames):
+                k = "frame_{}".format(str(fid).zfill(3))
+
+                size_array = np.empty(
+                    (int(tracks[c].max_particle_id.item())))
+                size_array[:] = np.NAN
+                vesicle_sizes[k] = size_array
+
+                signal_array = np.empty(
+                    (int(tracks[c].max_particle_id.item())))
+                signal_array[:] = np.NAN
+                vesicle_signals[k] = signal_array
+
+                overlap_array = np.empty(
+                    (int(tracks[c].max_particle_id.item())))
+                overlap_array[:] = np.NAN
+                vesicle_overlaps[k] = overlap_array
+
+                self.progress_signal.emit(counter)
+                self.progress_message.emit(
+                    "Saving linking results: {}%".format(
+                        int((float(counter) / float(2 * len(frames))) * 100)))
+                counter += 1
+
+            for traj in tracks[c]:
+                traj_id = int(traj.particle['particle'].max())
+                for fid, pid in traj.patches.iteritems():
+                    fkey = "frame_{}".format(fid.zfill(3))
+                    patch_obj = frames[int(fid)].identify_patch(pid, channel)
+                    vesicle_sizes[fkey][traj_id - 1] = patch_obj.size
+                    vesicle_signals[fkey][traj_id - 1] = patch_obj.signal
+                    vesicle_overlaps[fkey][traj_id - 1] = (
+                        float(patch_obj.size_overlapped) /
+                        float(patch_obj.size))
+
+            params = dict([("vesicle size", vesicle_sizes),
+                           ("vesicle signal", vesicle_signals),
+                           ("vesicle overlap", vesicle_overlaps)])
+
+            for k, v in params.iteritems():
+                df = self._df_from_dict(v)
+                df.to_excel(self.writer,
+                            sheet_name=("linked {} {}")
+                            .format(k, channel_names[c]),
+                            index=True)
 
     def _df_from_dict(self, data_dict, columns=None):
         df = pd.DataFrame().from_dict(
