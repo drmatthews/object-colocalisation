@@ -418,6 +418,51 @@ class Patches(object):
             fraction.append(patch.fraction_overlapped)
         return fraction
 
+
+class Trajectory(object):
+    def __init__(self, particle):
+        self.particle = particle
+        self.trajectory = self._create_trajectory(particle)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectory[key]
+        elif isinstance(key, slice):
+            return self.trajectory[key.start:key.stop:key.step]
+
+    def _create_trajectory(self, particle):
+        lines = []
+        first = particle.iloc[0]
+        x1 = first['x'].item()
+        y1 = first['y'].item()
+        for pid, p in particle.iterrows():
+            x2 = p['x'].item()
+            y2 = p['y'].item()
+            lines.append((x1, y1, x2, y2))
+            x1 = p['x'].item()
+            y1 = p['y'].item()
+        return lines
+
+
+class TrajectoryList(object):
+    def __init__(self, tracks):
+        self.trajectories = self._create_trajectories(tracks)
+
+    def __len__(self):
+        return len(self.trajectories)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.trajectories[key]
+        elif isinstance(key, slice):
+            return self.trajectories[key.start:key.stop:key.step]
+
+    def _create_trajectories(self, tracks):
+        trajectories = []
+        for tid, track in tracks.groupby('particle'):
+            trajectories.append(Trajectory(track))
+        return trajectories
+
 #
 # helpers for GUI
 #
@@ -539,7 +584,7 @@ def track(frames, channels):
         features = convert_to_features(frames, channel)
         t = tp.link_df(
             features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
-        tracks.append(tp.filter_stubs(t, 10))
+        tracks.append(TrajectoryList(tp.filter_stubs(t, 10)))
     return tracks
 
 
@@ -657,50 +702,6 @@ def read_patches_from_file(path):
         return patches
     else:
         raise ValueError("Input data must be in Excel format")
-
-
-class Trajectory(object):
-    def __init__(self, particle):
-        self.trajectory = self._create_trajectory(particle)
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self.trajectory[key]
-        elif isinstance(key, slice):
-            return self.trajectory[key.start:key.stop:key.step]
-
-    def _create_trajectory(self, particle):
-        lines = []
-        first = particle.iloc[0]
-        x1 = first['x'].item()
-        y1 = first['y'].item()
-        for pid, p in particle.iterrows():
-            x2 = p['x'].item()
-            y2 = p['y'].item()
-            lines.append((x1, y1, x2, y2))
-            x1 = p['x'].item()
-            y1 = p['y'].item()
-        return lines
-
-
-class TrajectoryList(object):
-    def __init__(self, tracks):
-        self.trajectories = self._create_trajectory_items(tracks)
-
-    def __len__(self):
-        return len(self.trajectories)
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self.trajectories[key]
-        elif isinstance(key, slice):
-            return self.trajectories[key.start:key.stop:key.step]
-
-    def _create_trajectory_items(self, tracks):
-        trajectories = []
-        for tid, track in tracks.groupby('particle'):
-            trajectories.append(Trajectory(track))
-        return trajectories
 
 
 if __name__ == '__main__':

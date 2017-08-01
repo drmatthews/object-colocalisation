@@ -18,7 +18,7 @@ import utils
 class ObcolWorker(QThread):
     progress_signal = Signal(int)
     progress_message = Signal(str)
-    results_signal = Signal(list)
+    results_signal = Signal(tuple)
 
     def __init__(self, parent=None):
         super(ObcolWorker, self).__init__(parent)
@@ -57,8 +57,9 @@ class ObcolWorker(QThread):
         """
         if self.is_stopped():
             return
-        results = self.object_colocalisation()
-        self.results_signal.emit(results)
+        frames = self.object_colocalisation()
+        tracks = self.do_tracking(frames)
+        self.results_signal.emit((frames, tracks))
         self.clear_queue()
         # self.save(results)
         # results = self.colocalise_movie_sequential()
@@ -95,6 +96,9 @@ class ObcolWorker(QThread):
         rs.wait()
         return results[0]
 
+    def do_tracking(self, frames):
+        return utils.track(frames, self.channels)
+
     def object_colocalisation_sequential(self):
         """
         Colocalise frames in a movie instance using parameters
@@ -129,6 +133,7 @@ class ObcolWorker(QThread):
         path = os.path.join(
             basepath, basename + channel_str + '_obcol_parameters.txt')
         with open(path, "w") as file:
+            file.write("object colocalisation:\n")
             file.write("channels:" +
                        ",".join([str(c) for c in self.channels]) + "\n")
             file.write("thresholds:" +
@@ -136,6 +141,12 @@ class ObcolWorker(QThread):
             file.write("size range:" +
                        ",".join([str(c) for c in self.size_range]) + "\n")
             file.write("gaussian filter sigma:" + str(self.sigma) + "\n")
+            file.write("\n")
+            file.write("linking:\n")
+            file.write("memory: 1\n")
+            file.write("range: 5\n")
+            file.write("adaptive stop: 1\n")
+            file.write("adaptive step: 0.99\n")
 
     def clear_queue(self):
         while not self.queue.empty():

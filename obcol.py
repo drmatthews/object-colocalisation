@@ -26,7 +26,7 @@ from threads import (ObcolWorker,
 os.environ["QT_API"] = "pyqt4"
 
 
-class Trajectory(object):
+class TrajectoryItem(object):
     def __init__(self, particle):
         self.pen = QtGui.QPen(QtGui.QColor(255, 255, 255))
         self.pen.setWidthF(1.0)
@@ -54,7 +54,7 @@ class Trajectory(object):
         return lines
 
 
-class TrajectoryList(object):
+class TrajectoryItemList(object):
     def __init__(self, tracks):
         self.trajectories = self._create_trajectory_items(tracks)
 
@@ -514,7 +514,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         # threads
         self.obcol_worker = ObcolWorker(self)
-        self.obcol_worker.results_signal.connect(self.obcol_plotter)
+        self.obcol_worker.results_signal.connect(self.post_processing)
         self.obcol_worker.progress_signal.connect(self.update_progress)
         self.obcol_worker.progress_message.connect(self.update_progress_text)
         self.save_worker = SaveWorker(self)
@@ -845,9 +845,8 @@ class MainGUIWindow(QtGui.QMainWindow):
         params = self.prepare_parameters()
         self.obcol_worker.start_thread(self.movie, params)
 
-    def obcol_plotter(self, result):
-        self.segmentation_result = result
-        self.tracks = utils.track(result, self.params['channels'])
+    def post_processing(self, result):
+        self.segmentation_result = result[0]
         # update GUI parameters
         self.is_segmentation = True
         self.is_movie = False
@@ -861,7 +860,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.ui.movie_radio.setChecked(False)
         # plot the histogram for each frame
         channel = self.params['channels'][0]
-        self.histogram_view.draw(result[0], 0, channel)
+        self.histogram_view.draw(self.segmentation_result[0], 0, channel)
 
         # now to plot overall stats effectively do an import
         # update the paths
@@ -877,7 +876,7 @@ class MainGUIWindow(QtGui.QMainWindow):
         self.analysis_channels.append(self.params['channels'])
         # prepare the data for the stats plot
         self.analysis_data.append(utils.convert_frames_to_patches(
-            result, self.params['channels']))
+            self.segmentation_result, self.params['channels']))
 
         # and update the overall stats plot
         self.analysis_view.draw(self.analysis_data, 0, self.analysis_channels)
@@ -938,9 +937,9 @@ class MainGUIWindow(QtGui.QMainWindow):
             current_labels = sr.get_mono_labels()
             frame = np.ascontiguousarray(current_labels)
 
-            trajectories = TrajectoryList(self.tracks[self.curr_seg_channel])
+            # trajectories = TrajectoryList(self.tracks[self.curr_seg_channel])
             self.movie_view.show_segmentation_frame(
-                frame, trajectories[0: self.curr_frame])
+                frame)
 
             self.coloc_view.show_segmentation_frame(
                 frame)
