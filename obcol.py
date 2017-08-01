@@ -455,6 +455,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
         # signals
         # self.ui.tabWidget.currentChanged.connect(self.handle_tab_change)
+        self.ui.actionOpen.triggered.connect(self.load_movie)
         self.ui.open_button.clicked.connect(self.load_movie)
         self.ui.save_button.clicked.connect(self.save)
         self.ui.quit_button.clicked.connect(self.quit)
