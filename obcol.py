@@ -27,10 +27,10 @@ os.environ["QT_API"] = "pyqt4"
 
 
 class TrajectoryItem(object):
-    def __init__(self, particle):
+    def __init__(self, traj):
         self.pen = QtGui.QPen(QtGui.QColor(255, 255, 255))
         self.pen.setWidthF(1.0)
-        self.trajectory = self._create_trajectory(particle)
+        self.trajectory = self._create_trajectory(traj)
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -38,19 +38,12 @@ class TrajectoryItem(object):
         elif isinstance(key, slice):
             return self.trajectory[key.start:key.stop:key.step]
 
-    def _create_trajectory(self, particle):
+    def _create_trajectory(self, traj):
         lines = []
-        first = particle.iloc[0]
-        x1 = first['x'].item()
-        y1 = first['y'].item()
-        for pid, p in particle.iterrows():
-            x2 = p['x'].item()
-            y2 = p['y'].item()
-            line = QtGui.QGraphicsLineItem(x1, y1, x2, y2)
+        for t in traj:
+            line = QtGui.QGraphicsLineItem(*t)
             line.setPen(self.pen)
             lines.append(line)
-            x1 = p['x'].item()
-            y1 = p['y'].item()
         return lines
 
 
@@ -69,8 +62,8 @@ class TrajectoryItemList(object):
 
     def _create_trajectory_items(self, tracks):
         trajectories = []
-        for tid, track in tracks.groupby('particle'):
-            trajectories.append(Trajectory(track))
+        for track in tracks:
+            trajectories.append(TrajectoryItem(track))
         return trajectories
 
 
@@ -847,6 +840,7 @@ class MainGUIWindow(QtGui.QMainWindow):
 
     def post_processing(self, result):
         self.segmentation_result = result[0]
+        self.tracks = result[1]
         # update GUI parameters
         self.is_segmentation = True
         self.is_movie = False
@@ -937,9 +931,10 @@ class MainGUIWindow(QtGui.QMainWindow):
             current_labels = sr.get_mono_labels()
             frame = np.ascontiguousarray(current_labels)
 
-            # trajectories = TrajectoryList(self.tracks[self.curr_seg_channel])
+            trajectories = TrajectoryItemList(
+                self.tracks[self.curr_seg_channel])
             self.movie_view.show_segmentation_frame(
-                frame)
+                frame, trajectories[0: self.curr_frame])
 
             self.coloc_view.show_segmentation_frame(
                 frame)
