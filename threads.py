@@ -193,7 +193,7 @@ class SaveWorker(QThread):
             channel_str += str(channel)
 
         path = os.path.join(basepath, basename + channel_str + '_obcol.xlsx')
-        writer = pd.ExcelWriter(path)
+        self.writer = pd.ExcelWriter(path)
         channel_names = ["red", "green"]
         counter = 0
         for c, channel in enumerate(channels):
@@ -260,41 +260,24 @@ class SaveWorker(QThread):
                 "fraction overlapped"]
 
             obcol_df.to_excel(
-                writer, sheet_name=channel_names[c], index=False)
+                self.writer, sheet_name=channel_names[c], index=False)
 
-            vnumber_df = pd.DataFrame().from_dict(
-                vesicle_number, orient='index')
-            vnumber_df.columns = ['num vesicles per frame']
+            vnumber_df = self._df_from_dict(vesicle_number,
+                                            columns=['num vesicles per frame'])
             vnumber_df.to_excel(
-                writer,
-                sheet_name="{} vesicle number".format(channel_names[c]),
+                self.writer,
+                sheet_name="vesicle number {}".format(channel_names[c]),
                 index=True)
 
-            vsize_df = pd.DataFrame().from_dict(vesicle_sizes, orient='index')
-            vsize_df['mean'] = vsize_df.mean(axis=1)
-            vsize_df['std'] = vsize_df.std(axis=1)
-            vsize_df.to_excel(
-                writer,
-                sheet_name="{} vesicle size".format(channel_names[c]),
-                index=True)
+            params = dict([("vesicle size", vesicle_sizes),
+                           ("vesicle signal", vesicle_signals),
+                           ("vesicle overlap", vesicle_overlaps)])
 
-            vsignal_df = pd.DataFrame().from_dict(
-                vesicle_signals, orient='index')
-            vsignal_df['mean'] = vsignal_df.mean(axis=1)
-            vsignal_df['std'] = vsignal_df.std(axis=1)
-            vsignal_df.to_excel(
-                writer,
-                sheet_name="{} vesicle signal".format(channel_names[c]),
-                index=True)
-
-            voverlap_df = pd.DataFrame().from_dict(
-                vesicle_overlaps, orient='index')
-            voverlap_df['mean'] = voverlap_df.mean(axis=1)
-            voverlap_df['std'] = voverlap_df.std(axis=1)
-            voverlap_df.to_excel(
-                writer,
-                sheet_name="{} vesicle overlap".format(channel_names[c]),
-                index=True)
+            for k, v in params.iteritems():
+                df = self._df_from_dict(v)
+                df.to_excel(self.writer,
+                            sheet_name="{} {}".format(k, channel_names[c]),
+                            index=True)
 
             label_array = np.rollaxis(np.dstack(labels), -1)
             label_filename = (
@@ -312,7 +295,16 @@ class SaveWorker(QThread):
             compress=6,
             metadata={'axes': 'TCYX'})
 
-        writer.save()
+        self.writer.save()
+
+    def _df_from_dict(self, data_dict, columns=None):
+        df = pd.DataFrame().from_dict(
+            data_dict, orient='index')
+        if columns:
+            df.columns = columns
+        df['mean'] = df.mean(axis=1)
+        df['std'] = df.std(axis=1)
+        return df
 
 
 class ImportWorker(QThread):
