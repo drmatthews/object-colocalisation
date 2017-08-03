@@ -341,7 +341,9 @@ class SaveWorker(QThread):
                         int((float(counter) / float(2 * len(frames))) * 100)))
                 counter += 1
 
+            all_particles = []
             for traj in tracks[c]:
+                all_particles.append(traj.particle)
                 traj_id = int(traj.particle['particle'].max())
                 for fid, pid in traj.patches.iteritems():
                     fkey = "frame_{}".format(fid.zfill(3))
@@ -351,6 +353,11 @@ class SaveWorker(QThread):
                     vesicle_overlaps[fkey][traj_id - 1] = (
                         float(patch_obj.size_overlapped) /
                         float(patch_obj.size))
+
+            particles_df = pd.DataFrame(all_particles)
+            particles_df.to_excel(
+                self.writer,
+                sheet_name='{} tracks'.format(channel_names[c]))
 
             params = dict([("vesicle size", vesicle_sizes),
                            ("vesicle signal", vesicle_signals),
