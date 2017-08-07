@@ -592,22 +592,35 @@ def convert_to_features(frames, channel):
     return df
 
 
+def run_tracking(features):
+    t = tp.link_df(
+        features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
+    t1 = tp.filter_stubs(t, 10)
+    particles = t1.particle.unique()
+    particle_reset = 0
+    for p in particles:
+        t1.loc[t1['particle'] == p, 'particle'] = particle_reset
+        particle_reset += 1
+    return t1
+
+
 def track(frames, channels):
     tracks = []
     for channel in channels:
         features = convert_to_features(frames, channel)
-        t = tp.link_df(
-            features, 5, adaptive_stop=1, adaptive_step=0.99, memory=1)
-        t1 = tp.filter_stubs(t, 10)
-        particles = t1.particle.unique()
-        particle_reset = 0
-        for p in particles:
-            t1.loc[t1['particle'] == p, 'particle'] = particle_reset
-            particle_reset += 1
-        print(t1.head())
-        tracks.append(TrajectoryList(t1))
+        t = run_tracking(features)
+        tracks.append(TrajectoryList(t))
     return tracks
 
+
+def redo_tracking(data):
+    features = data.filter(['frame id',
+                            'patch id',
+                            'centroid x',
+                            'centroid y'], axis=1)
+    features.columns = ['frame', 'patch id', 'x', 'y']
+    t = run_tracking(features)
+    return t
 
 #
 # for saving to excel using pandas
