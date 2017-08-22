@@ -614,13 +614,18 @@ def track(frames, channels):
 
 
 def redo_tracking(data):
-    features = data.filter(['frame id',
-                            'patch id',
-                            'centroid x',
-                            'centroid y'], axis=1)
-    features.columns = ['frame', 'patch id', 'x', 'y']
-    t = run_tracking(features)
-    return t
+    try:
+        features = data.filter(['frame id',
+                                'patch id',
+                                'centroid x',
+                                'centroid y'], axis=1)
+        features.columns = ['frame', 'patch id', 'x', 'y']
+        t = run_tracking(features)
+        return t
+    except ValueError:
+        print('no tracks')
+        return None
+
 
 #
 # for saving to excel using pandas
