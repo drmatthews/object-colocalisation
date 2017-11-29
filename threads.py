@@ -354,7 +354,8 @@ class SaveWorker(QThread):
                         float(patch_obj.size_overlapped) /
                         float(patch_obj.size))
 
-            particles_df = pd.DataFrame(all_particles)
+            particles_df = pd.concat(all_particles)
+            # particles_df.reset_index()
             particles_df.to_excel(
                 self.writer,
                 sheet_name='{} tracks'.format(channel_names[c]))
