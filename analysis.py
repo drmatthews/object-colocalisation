@@ -110,7 +110,6 @@ def rate_of_change_distance(traj, r2=0.8):
 def calculate_distance(tracks, tracks_path, reference):
     def distance(x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-
     distances = {}
     slopes = {}
     for traj_key in tracks.iterkeys():
@@ -122,8 +121,8 @@ def calculate_distance(tracks, tracks_path, reference):
             for tid, track in traj.groupby('particle'):
                 for nid, node in track.iterrows():
                     frame = node['frame']
-                    ref_x = reference['x'].iloc[int(frame)].item()
-                    ref_y = reference['y'].iloc[int(frame)].item()
+                    ref_x = reference['x'].iloc[int(frame) - 1].item()
+                    ref_y = reference['y'].iloc[int(frame) - 1].item()
                     node_x = node['x'].item()
                     node_y = node['y'].item()
                     d = distance(node_x, node_y, ref_x, ref_y)
@@ -194,10 +193,10 @@ def batch_distance_to_reference(input_dir, is_manual=True):
 
 
 if __name__ == '__main__':
-    tracks_dir = ('/home/daniel/Documents/Image Processing/'
-                  'Mag/data/processed/test/')
-    tracks_path = tracks_dir + 'WT 0-30min_channels_20_obcol.xlsx'
-    nucleus_path = tracks_dir + 'Results from WT 0-30min in µm per sec.csv'
+    tracks_dir = ('/home/daniel/Documents/programming/'
+                  'Image Processing/object_colocalisation/test/')
+    tracks_path = tracks_dir + 'KS 1_channels_10_obcol.xlsx'
+    nucleus_path = tracks_dir + 'Results from KS 1 in µm per sec.csv'
     d, s, n = distance_to_reference(tracks_path, nucleus_path)
     print(d.keys())
     # processed = batch(tracks_dir)
