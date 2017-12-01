@@ -108,12 +108,20 @@ def rate_of_change_distance(traj, r2=0.8):
 
 
 def calculate_distance(tracks, tracks_path, reference):
+
     def distance(x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
     distances = {}
     slopes = {}
     for traj_key in tracks.iterkeys():
         traj = tracks[traj_key]
+        num_nucleus_tracks = len(reference)
+        num_vesicle_tracks = traj['frame'].max()
+        if num_nucleus_tracks != num_vesicle_tracks:
+            print('The number of nucleus tracks does'
+                  ' not match the number of vesicle tracks')
+            raise ValueError
+
         print('calculating distance and fitting {} tracks'.format(traj_key))
         dist_vals = []
         slopes[traj_key] = []
@@ -169,10 +177,12 @@ def distance_to_reference(tracks_path, reference_path, is_manual=True):
         ref.columns = ['y', 'x']
         ref.index += 1
         ref.index.name = 'frame'
-
-    distances, slopes = calculate_distance(
-        read_tracks_from_file(tracks_path), tracks_path, ref)
-    return (distances, slopes, ref)
+    try:
+        distances, slopes = calculate_distance(
+            read_tracks_from_file(tracks_path), tracks_path, ref)
+        return (distances, slopes, ref)
+    except ValueError:
+        return (None, None, None)
 
 
 def batch_distance_to_reference(input_dir, is_manual=True):
@@ -186,8 +196,10 @@ def batch_distance_to_reference(input_dir, is_manual=True):
                             '{} per sec.csv'.format(
                                 basename, '\xc2\xb5m'.decode('utf8')))
             ref_path = os.path.join(input_dir, ref_filename)
-            results[filename] = distance_to_reference(
+            d, s, n = distance_to_reference(
                 tracks_path, ref_path, is_manual=is_manual)
+            if d is not None:
+                results[filename] = (d, s, n)
             sys.stdout.flush()
     return results
 
@@ -198,5 +210,4 @@ if __name__ == '__main__':
     tracks_path = tracks_dir + 'KS 1_channels_10_obcol.xlsx'
     nucleus_path = tracks_dir + 'Results from KS 1 in µm per sec.csv'
     d, s, n = distance_to_reference(tracks_path, nucleus_path)
-    print(d.keys())
     # processed = batch(tracks_dir)
