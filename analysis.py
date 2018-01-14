@@ -241,7 +241,7 @@ def batch_distance_to_reference(input_dir, is_manual=True):
     return results
 
 
-def distance_and_speed(tracks, mpp=1, fps=1):
+def motion(tracks, mpp=1, fps=1):
 
     for channel in tracks.iterkeys():
         traj = tracks[channel]
@@ -253,16 +253,29 @@ def distance_and_speed(tracks, mpp=1, fps=1):
             diagonal = tp.diagonal_size(particle) * mpp
             diagonal_distance.extend(
                 [diagonal * mpp for i in range(len(particle.index))])
+            dt = particle['frame'].iloc[-1] - particle['frame'].iloc[0]
+            dt = dt * (1 / fps)
             diagonal_speed.extend(
-                [diagonal * fps for i in range(len(particle.index))])
+                [diagonal / dt for i in range(len(particle.index))])
 
-            sq_distx = np.square(np.diff(particle.x) * mpp)
-            sq_disty = np.square(np.diff(particle.y) * mpp)
+            dx = np.diff(particle.x) * mpp
+            dy = np.diff(particle.y) * mpp
+            sq_distx = np.square(dx)
+            sq_disty = np.square(dy)
+
             dist = np.sum(np.sqrt(np.add(sq_distx, sq_disty)), dtype=np.float)
             track_distance.extend(
                 [dist for i in range(len(particle.index))])
             track_speed.extend(
-                [dist * fps for i in range(len(particle.index))])
+                [dist * dt for i in range(len(particle.index))])
+
+        if 'dx' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'dx', dx)
+
+        if 'dy' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'dy', dy)
 
         if 'diagonal distance' not in traj.columns:
             traj.insert(
@@ -285,14 +298,14 @@ def distance_and_speed(tracks, mpp=1, fps=1):
     return tracks
 
 
-def batch_distance_and_speed(input_dir, mpp=1, fps=1, sheetname=None):
+def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
 
     for filename in os.listdir(input_dir):
         if filename.endswith(".xlsx"):
             print('processing {}'.format(filename))
             tracks_path = os.path.join(input_dir, filename)
 
-            tracks = distance_and_speed(
+            tracks = motion(
                 import_tracks(tracks_path), mpp, fps)
 
             tracks_sheetname = 'tracks'
@@ -313,4 +326,4 @@ if __name__ == '__main__':
     tracks_path = tracks_dir + 'KS 1_channels_10_obcol.xlsx'
     nucleus_path = tracks_dir + 'Results from KS 1 in µm per sec.csv'
 
-    batch_distance_and_speed(tracks_dir)
+    batch_motion(tracks_dir)
