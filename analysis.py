@@ -115,12 +115,12 @@ def calculate_distance(tracks, tracks_path, reference):
     slopes = {}
     for traj_key in tracks.iterkeys():
         traj = tracks[traj_key]
-        num_nucleus_tracks = len(reference)
-        num_vesicle_tracks = traj['frame'].max()
-        if num_nucleus_tracks != num_vesicle_tracks:
-            print('The number of nucleus tracks does'
-                  ' not match the number of vesicle tracks')
-            raise ValueError
+        #num_nucleus_frames = len(reference) - 1
+        #num_vesicle_frames = traj['frame'].max()
+        #if num_nucleus_frames != num_vesicle_frames:
+        #    print('The number of nucleus frames does'
+        #          ' not match the number of vesicle frames')
+        #    raise ValueError
 
         print('calculating distance and fitting {} tracks'.format(traj_key))
         dist_vals = []
