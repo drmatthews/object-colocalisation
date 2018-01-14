@@ -244,6 +244,8 @@ def batch_distance_to_reference(input_dir, is_manual=True):
 def motion(tracks, mpp=1, fps=1):
 
     for channel in tracks.iterkeys():
+        dx_list = []
+        dy_list = []
         traj = tracks[channel]
         diagonal_distance = []
         diagonal_speed = []
@@ -257,11 +259,14 @@ def motion(tracks, mpp=1, fps=1):
             dt = dt * (1 / fps)
             diagonal_speed.extend(
                 [diagonal / dt for i in range(len(particle.index))])
-
-            dx = np.diff(particle.x) * mpp
-            dy = np.diff(particle.y) * mpp
-            sq_distx = np.square(dx)
-            sq_disty = np.square(dy)
+            dx_ = np.zeros((len(particle.index)))
+            dx_[1:] = np.diff(particle.x) * mpp
+            dx_list.append(dx_)
+            dy_ = np.zeros((len(particle.index)))
+            dy_[1:] = np.diff(particle.y) * mpp
+            dy_list.append(dy_)
+            sq_distx = np.square(dx_)
+            sq_disty = np.square(dy_)
 
             dist = np.sum(np.sqrt(np.add(sq_distx, sq_disty)), dtype=np.float)
             track_distance.extend(
@@ -270,10 +275,12 @@ def motion(tracks, mpp=1, fps=1):
                 [dist * dt for i in range(len(particle.index))])
 
         if 'dx' not in traj.columns:
+            dx = np.concatenate(dx_list)
             traj.insert(
                 len(traj.columns), 'dx', dx)
 
         if 'dy' not in traj.columns:
+            dy = np.concatenate(dy_list)
             traj.insert(
                 len(traj.columns), 'dy', dy)
 
