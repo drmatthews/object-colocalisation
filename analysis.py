@@ -299,7 +299,7 @@ def motion(tracks, mpp=1, fps=1):
 
 
 def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
-
+    results = {}
     for filename in os.listdir(input_dir):
         if filename.endswith(".xlsx"):
             print('processing {}'.format(filename))
@@ -307,6 +307,8 @@ def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
 
             tracks = motion(
                 import_tracks(tracks_path), mpp, fps)
+
+            results[filename] = tracks
 
             tracks_sheetname = 'tracks'
             if sheetname:
