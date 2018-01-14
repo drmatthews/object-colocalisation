@@ -304,18 +304,19 @@ class Patch(object):
     of the segmented objects.
     """
     def __init__(self, parameters):
+        self.dimensions = [0, 1]  # representing x,y
         self.id = parameters[0]
         self.pixels = parameters[1]  # x,y coords of pixels in image
         self.size = parameters[2]
-        self.centroid = parameters[3]
+        self.centroid = parameters[3]  # (row, col)
         intensity_image = parameters[4]
-        self.intensity = np.sum(intensity_image)
         self.channel = parameters[5]
-        self.size_overlapped = 0.0
-        self.fraction_overlapped = 0.0
         if len(parameters) > 6:
             self.size_overlapped = parameters[6]
             self.fraction_overlapped = parameters[7]
+        self.intensity = np.sum(intensity_image)
+        self.size_overlapped = 0.0
+        self.fraction_overlapped = 0.0
         self.signal = 0.0
 
     def __str__(self):
@@ -326,6 +327,15 @@ class Patch(object):
                        self.size,
                        self.intensity,
                        self.fraction_overlapped)
+
+    def squared_distance_to(self, other):
+        sum_squared = 0
+        for c in self.dimensions:
+            this_val = self.centroid[c]
+            other_val = other.centroid[c]
+            sum_squared += (other_val - this_val) * (other_val - this_val)
+
+        return sum_squared
 
 
 class Patches(object):

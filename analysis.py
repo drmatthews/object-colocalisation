@@ -5,8 +5,11 @@ import math
 import numpy as np
 from scipy import stats
 import pandas as pd
+from matplotlib import pyplot as plt
 from openpyxl import load_workbook
 import ijroi
+import trackpy as tp
+
 import utils
 
 
@@ -32,7 +35,7 @@ def write_tracks_to_file(path, tracks, sheetname):
     writer.save()
 
 
-def read_tracks_from_file(path):
+def import_tracks(path):
     if path.endswith('xlsx'):
         sheets = ['red', 'green']
         tracks = {}
@@ -82,6 +85,40 @@ def linear_regress(data, log=True, clip=None, r2=0.8, **kwargs):
     values = values.T
     fits = pd.concat(fits, axis=1)
     return (values, fits)
+
+
+def velocity_field(tracks, plot_quiver=True):
+
+    for channel in tracks.iterkeys():
+        traj = tracks[channel]
+        data = pd.DataFrame()
+        for item in set(traj.particle):
+            sub = traj[traj.particle == item]
+            dvx = np.diff(sub.x)
+            dvy = np.diff(sub.y)
+            sub_loop = zip(sub.x[:-1], sub.y[:-1], dvx, dvy, sub.frame[:-1],)
+            for x, y, dx, dy, frame in sub_loop:
+                data = data.append([{
+                    'dx': dx,
+                    'dy': dy,
+                    'x': x,
+                    'y': y,
+                    'frame': frame,
+                    'particle': item,
+                }])
+
+        if plot_quiver:
+            i = 20
+            d = data[data.frame == i]
+            plt.figure()
+            plt.quiver(
+                d.x, d.y, d.dx, -d.dy,
+                pivot='middle',
+                headwidth=4,
+                headlength=6,
+                color='red')
+            plt.axis('off')
+            plt.show()
 
 
 def rate_of_change_distance(traj, r2=0.8):
@@ -179,7 +216,7 @@ def distance_to_reference(tracks_path, reference_path, is_manual=True):
         ref.index.name = 'frame'
     try:
         distances, slopes = calculate_distance(
-            read_tracks_from_file(tracks_path), tracks_path, ref)
+            import_tracks(tracks_path), tracks_path, ref)
         return (distances, slopes, ref)
     except ValueError:
         return (None, None, None)
@@ -204,10 +241,76 @@ def batch_distance_to_reference(input_dir, is_manual=True):
     return results
 
 
+def distance_and_speed(tracks, mpp=1, fps=1):
+
+    for channel in tracks.iterkeys():
+        traj = tracks[channel]
+        diagonal_distance = []
+        diagonal_speed = []
+        track_distance = []
+        track_speed = []
+        for pid, particle in traj.groupby('particle'):
+            diagonal = tp.diagonal_size(particle) * mpp
+            diagonal_distance.extend(
+                [diagonal * mpp for i in range(len(particle.index))])
+            diagonal_speed.extend(
+                [diagonal * fps for i in range(len(particle.index))])
+
+            sq_distx = np.square(np.diff(particle.x) * mpp)
+            sq_disty = np.square(np.diff(particle.y) * mpp)
+            dist = np.sum(np.sqrt(np.add(sq_distx, sq_disty)), dtype=np.float)
+            track_distance.extend(
+                [dist for i in range(len(particle.index))])
+            track_speed.extend(
+                [dist * fps for i in range(len(particle.index))])
+
+        if 'diagonal distance' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'diagonal distance', diagonal_distance)
+
+        if 'diagonal speed' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'diagonal speed', diagonal_speed)
+
+        if 'track distance' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'track distance', track_distance)
+
+        if 'track speed' not in traj.columns:
+            traj.insert(
+                len(traj.columns), 'track speed', track_speed)
+
+        tracks[channel] = traj
+
+    return tracks
+
+
+def batch_distance_and_speed(input_dir, mpp=1, fps=1, sheetname=None):
+
+    for filename in os.listdir(input_dir):
+        if filename.endswith(".xlsx"):
+            print('processing {}'.format(filename))
+            tracks_path = os.path.join(input_dir, filename)
+
+            tracks = distance_and_speed(
+                import_tracks(tracks_path), mpp, fps)
+
+            tracks_sheetname = 'tracks'
+            if sheetname:
+                tracks_sheetname = sheetname
+
+            for channel in tracks.iterkeys():
+                ts = '{0} {1}'.format(channel, tracks_sheetname)
+                traj = tracks[channel]
+                write_tracks_to_file(tracks_path, traj, ts)
+
+    return tracks
+
+
 if __name__ == '__main__':
     tracks_dir = ('/home/daniel/Documents/programming/'
                   'Image Processing/object_colocalisation/test/')
     tracks_path = tracks_dir + 'KS 1_channels_10_obcol.xlsx'
     nucleus_path = tracks_dir + 'Results from KS 1 in µm per sec.csv'
-    d, s, n = distance_to_reference(tracks_path, nucleus_path)
-    # processed = batch(tracks_dir)
+
+    batch_distance_and_speed(tracks_dir)
