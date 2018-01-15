@@ -753,6 +753,35 @@ def read_patches_from_file(path):
         raise ValueError("Input data must be in Excel format")
 
 
+def import_tracks(path):
+    if path.endswith('xlsx'):
+        sheets = ['red', 'green']
+        tracks = {}
+        for sheet in sheets:
+            sheetname = '{} tracks'.format(sheet)
+            print('reading sheet {}'.format(sheetname))
+            try:
+                tracks[sheet] = pd.read_excel(path, sheetname=sheetname)
+            except: # noqa
+                print('no tracks in file - now running tracking')
+                data = pd.read_excel(path, sheetname=sheet)
+                tracks[sheet] = redo_tracking(data)
+        return tracks
+    else:
+        raise ValueError("Input data must be in Excel format")
+
+
+def batch_import_tracks(input_dir):
+    data = {}
+    for filename in os.listdir(input_dir):
+        if filename.endswith(".xlsx"):
+            print(filename)
+            tracks_path = os.path.join(input_dir, filename)
+            data[filename] = import_tracks(tracks_path)
+
+    return data
+
+
 if __name__ == '__main__':
 
     path = "/home/daniel/Documents/Image Processing/Mag/data/WT 0-30min 2.tif"

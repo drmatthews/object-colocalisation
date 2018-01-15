@@ -35,24 +35,6 @@ def write_tracks_to_file(path, tracks, sheetname):
     writer.save()
 
 
-def import_tracks(path):
-    if path.endswith('xlsx'):
-        sheets = ['red', 'green']
-        tracks = {}
-        for sheet in sheets:
-            sheetname = '{} tracks'.format(sheet)
-            print('reading sheet {}'.format(sheetname))
-            try:
-                tracks[sheet] = pd.read_excel(path, sheetname=sheetname)
-            except: # noqa
-                print('no tracks in file - now running tracking')
-                data = pd.read_excel(path, sheetname=sheet)
-                tracks[sheet] = utils.redo_tracking(data)
-        return tracks
-    else:
-        raise ValueError("Input data must be in Excel format")
-
-
 def linear_regress(data, log=True, clip=None, r2=0.8, **kwargs):
     """Fit a 1st order polynomial by doing first order polynomial fit."""
     ys = pd.DataFrame(data)
@@ -216,7 +198,7 @@ def distance_to_reference(tracks_path, reference_path, is_manual=True):
         ref.index.name = 'frame'
     try:
         distances, slopes = calculate_distance(
-            import_tracks(tracks_path), tracks_path, ref)
+            utils.import_tracks(tracks_path), tracks_path, ref)
         return (distances, slopes, ref)
     except ValueError:
         return (None, None, None)
@@ -313,7 +295,7 @@ def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
             tracks_path = os.path.join(input_dir, filename)
 
             tracks = motion(
-                import_tracks(tracks_path), mpp, fps)
+                utils.import_tracks(tracks_path), mpp, fps)
 
             results[filename] = tracks
 
@@ -329,10 +311,34 @@ def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
     return tracks
 
 
+def mean_motion_per_image(input_dir, condition, motion_parameter):
+    mean_val = {}
+    mean_val['red'] = 0
+    mean_val['green'] = 0
+    data = {}
+    for filename in os.listdir(input_dir):
+        if filename.endswith(".xlsx") and condition in filename:
+            tracks_path = os.path.join(input_dir, filename)
+            tracks = utils.import_tracks(tracks_path)
+            for channel in tracks.iterkeys():
+                traj = tracks[channel]
+                for pid, particle in traj.groupby('particle'):
+                    mean_val[channel] += particle[motion_parameter].iloc[0]
+
+                mean_val[channel] = (
+                    mean_val[channel] / len(set(traj['particle']))
+                )
+            data[filename] = mean_val
+
+    return data
+
+
 if __name__ == '__main__':
     tracks_dir = ('/home/daniel/Documents/programming/'
                   'Image Processing/object_colocalisation/test/')
     tracks_path = tracks_dir + 'KS 1_channels_10_obcol.xlsx'
     nucleus_path = tracks_dir + 'Results from KS 1 in µm per sec.csv'
 
-    batch_motion(tracks_dir)
+    # batch_motion(tracks_dir)
+    mean_distance = mean_motion_per_image(tracks_dir, 'KS', 'diagonal distance')
+    print(mean_distance)
