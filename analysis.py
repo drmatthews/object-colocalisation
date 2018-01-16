@@ -295,7 +295,7 @@ def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
             tracks_path = os.path.join(input_dir, filename)
 
             tracks = motion(
-                utils.import_tracks(tracks_path), mpp, fps)
+                utils.import_tracks(tracks_path, sheetname), mpp, fps)
 
             results[filename] = tracks
 
@@ -311,24 +311,26 @@ def batch_motion(input_dir, mpp=1, fps=1, sheetname=None):
     return tracks
 
 
-def mean_motion_per_image(input_dir, condition, motion_parameter):
-    mean_val = {}
-    mean_val['red'] = 0
-    mean_val['green'] = 0
+def mean_motion_per_image(input_dir, condition, motion_parameter, sheetname=None):
     data = {}
     for filename in os.listdir(input_dir):
         if filename.endswith(".xlsx") and condition in filename:
+            mean_val = {}
+            data[filename] = {}
             tracks_path = os.path.join(input_dir, filename)
-            tracks = utils.import_tracks(tracks_path)
+            tracks = utils.import_tracks(tracks_path, sheetname)
             for channel in tracks.iterkeys():
                 traj = tracks[channel]
+                total = 0
                 for pid, particle in traj.groupby('particle'):
-                    mean_val[channel] += particle[motion_parameter].iloc[0]
-
+                    total += particle[motion_parameter].iloc[0]
+                
                 mean_val[channel] = (
-                    mean_val[channel] / len(set(traj['particle']))
+                    total / len(set(traj['particle']))
                 )
+            
             data[filename] = mean_val
+    print data
 
     return data
 

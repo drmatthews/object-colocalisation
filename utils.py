@@ -753,18 +753,20 @@ def read_patches_from_file(path):
         raise ValueError("Input data must be in Excel format")
 
 
-def import_tracks(path):
+def import_tracks(path, sheetname=None):
     if path.endswith('xlsx'):
         sheets = ['red', 'green']
         tracks = {}
         for sheet in sheets:
-            sheetname = '{} tracks'.format(sheet)
-            print('reading sheet {}'.format(sheetname))
+            sn = '{} tracks'.format(sheet)
+            if sheetname:
+                sn = '{} {}'.format(sheet, sheetname)
+            print('reading sheet {}'.format(sn))
             try:
-                tracks[sheet] = pd.read_excel(path, sheetname=sheetname)
+                tracks[sheet] = pd.read_excel(path, sheetname=sn)
             except: # noqa
                 print('no tracks in file - now running tracking')
-                data = pd.read_excel(path, sheetname=sheet)
+                data = pd.read_excel(path, sheetname=sn)
                 tracks[sheet] = redo_tracking(data)
         return tracks
     else:
