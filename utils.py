@@ -9,6 +9,7 @@ from skimage.measure import regionprops
 from skimage.filters import gaussian
 import numpy as np
 import pandas as pd
+from xlrd import XLRDError
 from tifffile import imread
 import trackpy as tp
 from matplotlib import pyplot as plt
@@ -758,16 +759,25 @@ def import_tracks(path, sheetname=None):
         sheets = ['red', 'green']
         tracks = {}
         for sheet in sheets:
-            sn = '{} tracks'.format(sheet)
+            sn = ''
             if sheetname:
                 sn = '{} {}'.format(sheet, sheetname)
-            print('reading sheet {}'.format(sn))
+
             try:
-                tracks[sheet] = pd.read_excel(path, sheetname=sn)
-            except: # noqa
-                print('no tracks in file - now running tracking')
-                data = pd.read_excel(path, sheetname=sn)
-                tracks[sheet] = redo_tracking(data)
+                df = pd.read_excel(path, sheet_name=sn)
+                tracks[sheet] = df[['x', 'y', 'frame', 'particle']].copy()
+                print('read sheet {}'.format(sn))
+            except ValueError:
+                sn = '{} tracks'.format(sheet)
+                df = pd.read_excel(path, sheet_name=sn)
+                tracks[sheet] = df[['x', 'y', 'frame', 'particle']].copy()
+                print('read sheet {}'.format(sn))
+            except XLRDError:
+                sn = '{} motion'.format(sheet)
+                df = pd.read_excel(path, sheet_name=sn)
+                tracks[sheet] = df[['x', 'y', 'frame', 'particle']].copy()
+                print('read sheet {}'.format(sn))
+
         return tracks
     else:
         raise ValueError("Input data must be in Excel format")
