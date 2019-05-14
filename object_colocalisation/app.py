@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from PyQt4 import QtCore, QtGui
 
-import obcol_gui as obcol_gui
+from object_colocalisation.gui import obcol_gui as obcol_gui
 import sys
 import os
 import numpy as np
